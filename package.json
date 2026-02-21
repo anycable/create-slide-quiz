@@ -1,0 +1,28 @@
+{
+  "name": "create-live-quiz",
+  "version": "0.1.0",
+  "description": "Scaffold a Reveal.js presentation with live audience quizzes",
+  "type": "module",
+  "bin": "index.mjs",
+  "files": [
+    "index.mjs",
+    "functions"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/irinanazarova/create-live-quiz"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.9.1",
+    "picocolors": "^1.1.1"
+  },
+  "license": "MIT",
+  "keywords": [
+    "create",
+    "scaffolder",
+    "reveal.js",
+    "quiz",
+    "live-quiz",
+    "anycable"
+  ]
+}
