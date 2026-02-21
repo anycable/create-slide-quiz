@@ -131,12 +131,6 @@ async function main() {
           validate: (v) =>
             v.startsWith("https://") ? undefined : 'Should start with "https://"',
         }),
-      broadcastKey: () =>
-        p.text({
-          message: "Broadcast key (may be empty)",
-          placeholder: "leave empty if none",
-          defaultValue: "",
-        }),
     },
     {
       onCancel: () => {
@@ -374,7 +368,7 @@ createParticipantUI("#quiz-root", {
   // .env
   writeFileSync(
     join(projectDir, ".env"),
-    `ANYCABLE_BROADCAST_URL=${urls.broadcastUrl}\nANYCABLE_BROADCAST_KEY=${urls.broadcastKey}\n`,
+    `ANYCABLE_BROADCAST_URL=${urls.broadcastUrl}\n`,
   );
 
   // Serverless functions
@@ -453,12 +447,6 @@ createParticipantUI("#quiz-root", {
             cwd: projectDir,
             stdio: "pipe",
           });
-          if (urls.broadcastKey) {
-            execSync(`netlify env:set ANYCABLE_BROADCAST_KEY "${urls.broadcastKey}"`, {
-              cwd: projectDir,
-              stdio: "pipe",
-            });
-          }
           s.stop("Environment variables set on Netlify!");
         } catch {
           s.stop("Could not set env vars — set them in the Netlify dashboard.");
@@ -491,9 +479,8 @@ createParticipantUI("#quiz-root", {
           "1. Import your Git repo",
           "2. Build command: npm run build",
           "3. Publish directory: dist",
-          "4. Add env vars in Site settings → Environment variables:",
+          "4. Add env var in Site settings → Environment variables:",
           `   ANYCABLE_BROADCAST_URL = ${urls.broadcastUrl}`,
-          urls.broadcastKey ? `   ANYCABLE_BROADCAST_KEY = ${urls.broadcastKey}` : "",
           "",
           `Or install the CLI: ${color.cyan("npm i -g netlify-cli")}`,
         ]
@@ -526,12 +513,6 @@ createParticipantUI("#quiz-root", {
             `echo "${urls.broadcastUrl}" | vercel env add ANYCABLE_BROADCAST_URL production`,
             { cwd: projectDir, stdio: "pipe" },
           );
-          if (urls.broadcastKey) {
-            execSync(
-              `echo "${urls.broadcastKey}" | vercel env add ANYCABLE_BROADCAST_KEY production`,
-              { cwd: projectDir, stdio: "pipe" },
-            );
-          }
           s.stop("Environment variables set on Vercel!");
         } catch {
           s.stop("Could not set env vars — set them in the Vercel dashboard.");
@@ -560,9 +541,8 @@ createParticipantUI("#quiz-root", {
         [
           "1. Import your Git repo",
           "2. Framework preset: Vite",
-          "3. Add env vars in Settings → Environment Variables:",
+          "3. Add env var in Settings → Environment Variables:",
           `   ANYCABLE_BROADCAST_URL = ${urls.broadcastUrl}`,
-          urls.broadcastKey ? `   ANYCABLE_BROADCAST_KEY = ${urls.broadcastKey}` : "",
           "",
           `Or install the CLI: ${color.cyan("npm i -g vercel")}`,
         ]
