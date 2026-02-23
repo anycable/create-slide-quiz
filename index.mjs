@@ -57,7 +57,48 @@ async function main() {
   );
 
   // ═══════════════════════════════════════════
-  // Step 1: AnyCable Plus
+  // Prerequisites
+  // ═══════════════════════════════════════════
+
+  const hasGit = hasCommand("git");
+  if (!hasGit) {
+    p.log.error("Git is required but not installed. Install it from https://git-scm.com");
+    return p.cancel("Missing prerequisites.");
+  }
+
+  // ═══════════════════════════════════════════
+  // Step 1: Project config
+  // ═══════════════════════════════════════════
+
+  let urls, config;
+
+  config = await p.group(
+    {
+      projectName: () =>
+        p.text({
+          message: "Presentation folder name",
+          placeholder: "my-railsconf-talk",
+          defaultValue: "my-quiz-deck",
+        }),
+      platform: () =>
+        p.select({
+          message: "Deploy platform",
+          options: [
+            { value: "netlify", label: "Netlify", hint: "recommended" },
+            { value: "vercel", label: "Vercel" },
+          ],
+        }),
+    },
+    {
+      onCancel: () => {
+        p.cancel("Cancelled.");
+        process.exit(0);
+      },
+    },
+  );
+
+  // ═══════════════════════════════════════════
+  // Step 2: AnyCable Plus
   // ═══════════════════════════════════════════
 
   const setupAnyCable = await p.confirm({
@@ -114,66 +155,82 @@ async function main() {
     p.log.success("AnyCable app is ready!");
   }
 
-  // Get URLs
-  const urls = await p.group(
-    {
-      wsUrl: () =>
-        p.text({
-          message: "WebSocket URL",
-          placeholder: "wss://your-cable.anycable.io/cable",
-          validate: (v) =>
-            v.startsWith("wss://") ? undefined : 'Should start with "wss://"',
-        }),
-      broadcastUrl: () =>
-        p.text({
-          message: "Broadcast URL",
-          placeholder: "https://your-cable.anycable.io/_broadcast",
-          validate: (v) =>
-            v.startsWith("https://") ? undefined : 'Should start with "https://"',
-        }),
-    },
-    {
-      onCancel: () => {
-        p.cancel("Cancelled.");
-        process.exit(0);
-      },
-    },
-  );
-
   // ═══════════════════════════════════════════
-  // Step 2: Project config
+  // Step 3: AnyCable URLs + review
   // ═══════════════════════════════════════════
 
-  const config = await p.group(
-    {
-      projectName: () =>
-        p.text({
-          message: "Project folder name",
-          placeholder: "my-quiz-deck",
-          defaultValue: "my-quiz-deck",
-        }),
-      quizGroupId: () =>
-        p.text({
-          message: "Quiz group ID (unique per talk)",
-          placeholder: "my-talk",
-          defaultValue: "my-talk",
-        }),
-      platform: () =>
-        p.select({
-          message: "Deploy platform",
-          options: [
-            { value: "netlify", label: "Netlify", hint: "recommended" },
-            { value: "vercel", label: "Vercel" },
-          ],
-        }),
-    },
-    {
-      onCancel: () => {
-        p.cancel("Cancelled.");
-        process.exit(0);
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    urls = await p.group(
+      {
+        wsUrl: () =>
+          p.text({
+            message: "WebSocket URL",
+            placeholder: "wss://your-cable.anycable.io/cable",
+            defaultValue: urls?.wsUrl,
+            validate: (v) =>
+              v.startsWith("wss://") ? undefined : 'Should start with "wss://"',
+          }),
+        broadcastUrl: () =>
+          p.text({
+            message: "Broadcast URL",
+            placeholder: "https://your-cable.anycable.io/_broadcast",
+            defaultValue: urls?.broadcastUrl,
+            validate: (v) =>
+              v.startsWith("https://") ? undefined : 'Should start with "https://"',
+          }),
       },
-    },
-  );
+      {
+        onCancel: () => {
+          p.cancel("Cancelled.");
+          process.exit(0);
+        },
+      },
+    );
+
+    // Show summary
+    p.note(
+      [
+        `Folder:         ${color.cyan(config.projectName)}`,
+        `Platform:       ${color.cyan(config.platform)}`,
+        `WebSocket URL:  ${color.cyan(urls.wsUrl)}`,
+        `Broadcast URL:  ${color.cyan(urls.broadcastUrl)}`,
+      ].join("\n"),
+      "Review your settings",
+    );
+
+    const reviewAction = await p.select({
+      message: "Look good?",
+      options: [
+        { value: "confirm", label: "Yes, scaffold the project" },
+        { value: "edit_folder", label: "Change folder name" },
+        { value: "edit_platform", label: "Change platform" },
+        { value: "edit_urls", label: "Change AnyCable URLs" },
+      ],
+    });
+    if (p.isCancel(reviewAction)) return p.cancel("Cancelled.");
+
+    if (reviewAction === "confirm") break;
+
+    if (reviewAction === "edit_folder") {
+      const newName = await p.text({
+        message: "Presentation folder name",
+        defaultValue: config.projectName,
+      });
+      if (!p.isCancel(newName)) config.projectName = newName;
+    } else if (reviewAction === "edit_platform") {
+      const newPlatform = await p.select({
+        message: "Deploy platform",
+        options: [
+          { value: "netlify", label: "Netlify", hint: "recommended" },
+          { value: "vercel", label: "Vercel" },
+        ],
+      });
+      if (!p.isCancel(newPlatform)) config.platform = newPlatform;
+    } else if (reviewAction === "edit_urls") {
+      continue; // loops back to URL prompts
+    }
+  }
 
   const projectDir = resolve(process.cwd(), config.projectName);
 
@@ -247,7 +304,7 @@ const deck = new Reveal({
   plugins: [RevealLiveQuiz],
   liveQuiz: {
     wsUrl: "${urls.wsUrl}",
-    quizGroupId: "${config.quizGroupId}",
+    quizGroupId: "${config.projectName}",
     quizUrl: \`\${window.location.origin}/quiz.html\`,${endpointsJs}
   },
   hash: true,
@@ -342,7 +399,7 @@ import "live-quiz/participant.css";
 
 createParticipantUI("#quiz-root", {
   wsUrl: "${urls.wsUrl}",
-  quizGroupId: "${config.quizGroupId}",${endpointsJs}
+  quizGroupId: "${config.projectName}",${endpointsJs}
   questions: [
     {
       quizId: "q1",
@@ -408,6 +465,7 @@ createParticipantUI("#quiz-root", {
   }
 
   // Git init
+  let gitRemoteUrl = "";
   if (!existsSync(join(projectDir, ".git"))) {
     try {
       execSync('git init && git add -A && git commit -m "Initial commit from create-live-quiz"', {
@@ -420,8 +478,56 @@ createParticipantUI("#quiz-root", {
     }
   }
 
+  // Check for existing remote
+  try {
+    gitRemoteUrl = execSync("git remote get-url origin", { cwd: projectDir, stdio: "pipe" })
+      .toString()
+      .trim();
+  } catch {
+    // no remote yet
+  }
+
   // ═══════════════════════════════════════════
-  // Step 5: Platform deploy
+  // Step 5: Push to GitHub
+  // ═══════════════════════════════════════════
+
+  if (!gitRemoteUrl) {
+    p.note(
+      [
+        `Before deploying, push your project to GitHub:`,
+        "",
+        `  1. Create a new repo on GitHub (e.g. ${color.cyan(config.projectName)})`,
+        `  2. Then run:`,
+        "",
+        `     ${color.dim("cd")} ${config.projectName}`,
+        `     ${color.dim("git remote add origin")} git@github.com:YOUR_USER/${config.projectName}.git`,
+        `     ${color.dim("git push -u origin main")}`,
+      ].join("\n"),
+      "Push to GitHub",
+    );
+
+    await p.confirm({
+      message: "Pushed to GitHub? (or skip deploy for now)",
+      active: "Continue",
+      inactive: "Waiting...",
+    });
+
+    // Re-check for remote
+    try {
+      gitRemoteUrl = execSync("git remote get-url origin", { cwd: projectDir, stdio: "pipe" })
+        .toString()
+        .trim();
+    } catch {
+      // still no remote
+    }
+  }
+
+  const repoName = gitRemoteUrl
+    ? gitRemoteUrl.replace(/.*[:/](.+\/.+?)(?:\.git)?$/, "$1")
+    : config.projectName;
+
+  // ═══════════════════════════════════════════
+  // Step 6: Platform deploy
   // ═══════════════════════════════════════════
 
   if (config.platform === "netlify") {
@@ -476,16 +582,18 @@ createParticipantUI("#quiz-root", {
 
       p.note(
         [
-          "1. Import your Git repo",
-          "2. Build command: npm run build",
-          "3. Publish directory: dist",
-          "4. Add env var in Site settings → Environment variables:",
-          `   ANYCABLE_BROADCAST_URL = ${urls.broadcastUrl}`,
+          `1. Click ${color.bold("Import an existing project")}`,
+          gitRemoteUrl
+            ? `2. Connect your GitHub repo: ${color.cyan(repoName)}`
+            : `2. Connect your GitHub repo (push to GitHub first if you haven't)`,
+          `3. Build command: ${color.cyan("npm run build")}`,
+          `4. Publish directory: ${color.cyan("dist")}`,
+          `5. Add environment variable:`,
+          `   ${color.cyan("ANYCABLE_BROADCAST_URL")} = ${urls.broadcastUrl}`,
+          `6. Click Deploy!`,
           "",
           `Or install the CLI: ${color.cyan("npm i -g netlify-cli")}`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
+        ].join("\n"),
         "Deploy to Netlify",
       );
     }
@@ -539,15 +647,17 @@ createParticipantUI("#quiz-root", {
 
       p.note(
         [
-          "1. Import your Git repo",
-          "2. Framework preset: Vite",
-          "3. Add env var in Settings → Environment Variables:",
-          `   ANYCABLE_BROADCAST_URL = ${urls.broadcastUrl}`,
+          `1. Click ${color.bold("Import Git Repository")}`,
+          gitRemoteUrl
+            ? `2. Select your repo: ${color.cyan(repoName)}`
+            : `2. Select your repo (push to GitHub first if you haven't)`,
+          `3. Framework preset: ${color.cyan("Vite")}`,
+          `4. Add environment variable:`,
+          `   ${color.cyan("ANYCABLE_BROADCAST_URL")} = ${urls.broadcastUrl}`,
+          `5. Click Deploy!`,
           "",
           `Or install the CLI: ${color.cyan("npm i -g vercel")}`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
+        ].join("\n"),
         "Deploy to Vercel",
       );
     }
