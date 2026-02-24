@@ -406,18 +406,6 @@ import "live-quiz/participant.css";
 createParticipantUI("#quiz-root", {
   wsUrl: "${urls.wsUrl}",
   quizGroupId: "${quizGroupId}",${vercelEndpoints}
-  questions: [
-    {
-      quizId: "q1",
-      question: "What's your favorite color?",
-      options: [
-        { label: "A", text: "Red" },
-        { label: "B", text: "Blue" },
-        { label: "C", text: "Green" },
-        { label: "D", text: "Yellow" },
-      ],
-    },
-  ],
 });
 `,
     );
