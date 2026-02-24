@@ -1,22 +1,25 @@
 #!/usr/bin/env node
 
 /**
- * create-live-quiz — Interactive scaffolder for live-quiz
+ * create-live-quiz — Add live audience quizzes to your Reveal.js presentation
  *
- * Usage: npx create-live-quiz
+ * Usage: cd your-presentation && npx create-live-quiz
  */
 
 import * as p from "@clack/prompts";
 import { execSync, exec } from "node:child_process";
-import { mkdirSync, writeFileSync, existsSync, copyFileSync } from "node:fs";
-import { join, resolve, dirname } from "node:path";
+import {
+  mkdirSync, writeFileSync, readFileSync, existsSync,
+  copyFileSync, readdirSync, appendFileSync,
+} from "node:fs";
+import { join, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { platform } from "node:process";
 import color from "picocolors";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// ── Helpers ──
+// —— Helpers ——
 
 function openUrl(url) {
   const cmd =
@@ -39,67 +42,196 @@ function run(cmd, cwd) {
   execSync(cmd, { cwd, stdio: "inherit" });
 }
 
-// ── Main ──
+// —— Detection ——
+
+const REVEAL_CLASS_RE = /class\s*=\s*"[^"]*\breveal\b[^"]*"/;
+const REVEAL_INIT_RE = /Reveal\.(initialize|configure)\(|new\s+Reveal\(/;
+
+function findRevealHtml(dir) {
+  const files = readdirSync(dir)
+    .filter(f => f.endsWith(".html"))
+    .sort((a, b) => (a === "index.html" ? -1 : b === "index.html" ? 1 : 0));
+
+  for (const file of files) {
+    if (REVEAL_CLASS_RE.test(readFileSync(join(dir, file), "utf-8"))) return file;
+  }
+  return null;
+}
+
+function findJsEntry(dir, htmlContent) {
+  const match = htmlContent.match(/<script\s+type\s*=\s*"module"\s+src\s*=\s*"([^"]+)"/);
+  if (match) {
+    const src = match[1].replace(/^\//, "");
+    if (existsSync(join(dir, src)) && REVEAL_INIT_RE.test(readFileSync(join(dir, src), "utf-8"))) {
+      return src;
+    }
+  }
+
+  for (const name of ["main.js", "src/main.js", "index.js", "src/index.js"]) {
+    if (existsSync(join(dir, name)) && REVEAL_INIT_RE.test(readFileSync(join(dir, name), "utf-8"))) {
+      return name;
+    }
+  }
+  return null;
+}
+
+function detectPlatform(dir) {
+  if (existsSync(join(dir, "netlify.toml")) || existsSync(join(dir, ".netlify"))) return "netlify";
+  if (existsSync(join(dir, "vercel.json")) || existsSync(join(dir, ".vercel"))) return "vercel";
+  return null;
+}
+
+function detectVite(dir) {
+  for (const name of ["vite.config.js", "vite.config.ts", "vite.config.mjs", "vite.config.mts"]) {
+    if (existsSync(join(dir, name))) return name;
+  }
+  return null;
+}
+
+// —— File modification ——
+
+function insertQuizSlides(dir, htmlFile) {
+  const filePath = join(dir, htmlFile);
+  const content = readFileSync(filePath, "utf-8");
+
+  const slidesMatch = content.match(/class\s*=\s*"[^"]*\bslides\b[^"]*"/);
+  if (!slidesMatch) return false;
+
+  // Walk past nested <div>s to find the closing </div> of .slides
+  let depth = 0;
+  let i = content.indexOf(">", slidesMatch.index) + 1;
+  while (i < content.length) {
+    if (content.startsWith("<div", i)) depth++;
+    else if (content.startsWith("</div>", i)) {
+      if (depth === 0) break;
+      depth--;
+    }
+    i++;
+  }
+  if (i >= content.length) return false;
+
+  const quizHtml = `
+        <!-- Sample quiz — edit or move these slides! -->
+        <section data-quiz-id="q1"
+                 data-quiz-question="What's your favorite color?"
+                 data-quiz-options='[
+                   {"label":"A","text":"Red"},
+                   {"label":"B","text":"Blue","correct":true},
+                   {"label":"C","text":"Green"},
+                   {"label":"D","text":"Yellow"}
+                 ]'>
+        </section>
+
+        <section data-quiz-results="q1"
+                 data-quiz-question="What's your favorite color?"
+                 data-quiz-options='[
+                   {"label":"A","text":"Red"},
+                   {"label":"B","text":"Blue","correct":true},
+                   {"label":"C","text":"Green"},
+                   {"label":"D","text":"Yellow"}
+                 ]'>
+        </section>
+`;
+
+  writeFileSync(filePath, content.slice(0, i) + quizHtml + content.slice(i));
+  return true;
+}
+
+function ensureGitignore(dir, entry) {
+  const gitignorePath = join(dir, ".gitignore");
+  if (existsSync(gitignorePath)) {
+    const content = readFileSync(gitignorePath, "utf-8");
+    if (content.split("\n").some(line => line.trim() === entry)) return;
+    appendFileSync(gitignorePath, `\n${entry}\n`);
+  } else {
+    writeFileSync(gitignorePath, `${entry}\n`);
+  }
+}
+
+// —— Main ——
 
 async function main() {
-  console.clear();
-
   p.intro(color.bgCyan(color.black(" create-live-quiz ")));
+
+  const dir = process.cwd();
+
+  // Step 1 — Detect project
+
+  const s = p.spinner();
+  s.start("Detecting Reveal.js project...");
+
+  const htmlFile = findRevealHtml(dir);
+  if (!htmlFile) {
+    s.stop(color.red("No HTML file with class=\"reveal\" found."));
+    p.log.error("Could not find a Reveal.js HTML file in this directory.");
+    return p.cancel("No Reveal.js HTML detected.");
+  }
+
+  const pkgPath = join(dir, "package.json");
+  let pkg;
+  let needsInit = false;
+
+  if (!existsSync(pkgPath)) {
+    needsInit = true;
+  } else {
+    try {
+      pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+    } catch {
+      s.stop(color.red("Could not parse package.json."));
+      return p.cancel("Invalid package.json.");
+    }
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    if (!deps["reveal.js"]) needsInit = true;
+  }
+
+  if (needsInit) {
+    s.stop(color.green(`Found ${htmlFile}`));
+
+    if (!existsSync(pkgPath)) {
+      p.log.info("No package.json found — initializing project...");
+      execSync("npm init -y", { cwd: dir, stdio: "pipe" });
+    }
+
+    p.log.info("Installing reveal.js...");
+    execSync("npm install reveal.js", { cwd: dir, stdio: "pipe" });
+    pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+    p.log.success("Project initialized with reveal.js");
+  }
+
+  const htmlContent = readFileSync(join(dir, htmlFile), "utf-8");
+  const jsEntry = findJsEntry(dir, htmlContent);
+  let platform = detectPlatform(dir);
+  const viteConfig = detectVite(dir);
+  const quizGroupId = pkg.name || basename(dir);
+
+  if (!needsInit) s.stop(color.green("Reveal.js project detected!"));
 
   p.note(
     [
-      "This will walk you through setting up a Reveal.js",
-      "presentation with live audience quizzes.",
-      "",
-      `Powered by ${color.cyan("AnyCable")} + ${color.cyan("live-quiz")}`,
+      `HTML file:   ${color.cyan(htmlFile)}`,
+      `JS entry:    ${jsEntry ? color.cyan(jsEntry) : color.dim("not found")}`,
+      `Platform:    ${platform ? color.cyan(platform) : color.dim("not detected")}`,
+      `Vite:        ${viteConfig ? color.cyan(viteConfig) : color.dim("not detected")}`,
+      `Quiz group:  ${color.cyan(quizGroupId)}`,
     ].join("\n"),
-    "Welcome",
+    "Detected project",
   );
 
-  // ═══════════════════════════════════════════
-  // Prerequisites
-  // ═══════════════════════════════════════════
+  // Step 2 — Platform (if not auto-detected)
 
-  const hasGit = hasCommand("git");
-  if (!hasGit) {
-    p.log.error("Git is required but not installed. Install it from https://git-scm.com");
-    return p.cancel("Missing prerequisites.");
+  if (!platform) {
+    const choice = await p.select({
+      message: "Deploy platform",
+      options: [
+        { value: "netlify", label: "Netlify", hint: "recommended" },
+        { value: "vercel", label: "Vercel" },
+      ],
+    });
+    if (p.isCancel(choice)) return p.cancel("Cancelled.");
+    platform = choice;
   }
 
-  // ═══════════════════════════════════════════
-  // Step 1: Project config
-  // ═══════════════════════════════════════════
-
-  let urls, config;
-
-  config = await p.group(
-    {
-      projectName: () =>
-        p.text({
-          message: "Presentation folder name",
-          placeholder: "my-railsconf-talk",
-          defaultValue: "my-quiz-deck",
-        }),
-      platform: () =>
-        p.select({
-          message: "Deploy platform",
-          options: [
-            { value: "netlify", label: "Netlify", hint: "recommended" },
-            { value: "vercel", label: "Vercel" },
-          ],
-        }),
-    },
-    {
-      onCancel: () => {
-        p.cancel("Cancelled.");
-        process.exit(0);
-      },
-    },
-  );
-
-  // ═══════════════════════════════════════════
-  // Step 2: AnyCable Plus
-  // ═══════════════════════════════════════════
+  // Step 3 — AnyCable Plus setup
 
   const setupAnyCable = await p.confirm({
     message: "Do you already have an AnyCable Plus app set up?",
@@ -155,11 +287,10 @@ async function main() {
     p.log.success("AnyCable app is ready!");
   }
 
-  // ═══════════════════════════════════════════
-  // Step 3: AnyCable URLs + review
-  // ═══════════════════════════════════════════
+  // Step 4 — AnyCable URLs + review
 
-  // eslint-disable-next-line no-constant-condition
+  let urls;
+
   while (true) {
     urls = await p.group(
       {
@@ -168,7 +299,7 @@ async function main() {
             message: "WebSocket URL",
             placeholder: "wss://your-cable.anycable.io/cable",
             defaultValue: urls?.wsUrl,
-            validate: (v) =>
+            validate: v =>
               v.startsWith("wss://") ? undefined : 'Should start with "wss://"',
           }),
         broadcastUrl: () =>
@@ -176,7 +307,7 @@ async function main() {
             message: "Broadcast URL",
             placeholder: "https://your-cable.anycable.io/_broadcast",
             defaultValue: urls?.broadcastUrl,
-            validate: (v) =>
+            validate: v =>
               v.startsWith("https://") ? undefined : 'Should start with "https://"',
           }),
       },
@@ -188,13 +319,14 @@ async function main() {
       },
     );
 
-    // Show summary
     p.note(
       [
-        `Folder:         ${color.cyan(config.projectName)}`,
-        `Platform:       ${color.cyan(config.platform)}`,
+        `HTML file:      ${color.cyan(htmlFile)}`,
+        `JS entry:       ${jsEntry ? color.cyan(jsEntry) : color.dim("(manual setup)")}`,
+        `Platform:       ${color.cyan(platform)}`,
         `WebSocket URL:  ${color.cyan(urls.wsUrl)}`,
         `Broadcast URL:  ${color.cyan(urls.broadcastUrl)}`,
+        `Quiz group:     ${color.cyan(quizGroupId)}`,
       ].join("\n"),
       "Review your settings",
     );
@@ -202,8 +334,7 @@ async function main() {
     const reviewAction = await p.select({
       message: "Look good?",
       options: [
-        { value: "confirm", label: "Yes, scaffold the project" },
-        { value: "edit_folder", label: "Change folder name" },
+        { value: "confirm", label: "Yes, install live-quiz" },
         { value: "edit_platform", label: "Change platform" },
         { value: "edit_urls", label: "Change AnyCable URLs" },
       ],
@@ -212,13 +343,7 @@ async function main() {
 
     if (reviewAction === "confirm") break;
 
-    if (reviewAction === "edit_folder") {
-      const newName = await p.text({
-        message: "Presentation folder name",
-        defaultValue: config.projectName,
-      });
-      if (!p.isCancel(newName)) config.projectName = newName;
-    } else if (reviewAction === "edit_platform") {
+    if (reviewAction === "edit_platform") {
       const newPlatform = await p.select({
         message: "Deploy platform",
         options: [
@@ -226,153 +351,30 @@ async function main() {
           { value: "vercel", label: "Vercel" },
         ],
       });
-      if (!p.isCancel(newPlatform)) config.platform = newPlatform;
-    } else if (reviewAction === "edit_urls") {
-      continue; // loops back to URL prompts
+      if (!p.isCancel(newPlatform)) platform = newPlatform;
     }
+    // edit_urls falls through to next iteration
   }
 
-  const projectDir = resolve(process.cwd(), config.projectName);
+  // Step 5 — Install + create files
 
-  if (existsSync(projectDir)) {
-    const overwrite = await p.confirm({
-      message: `${config.projectName}/ already exists. Continue?`,
-      initialValue: false,
-    });
-    if (!overwrite || p.isCancel(overwrite)) return p.cancel("Cancelled.");
+  s.start("Installing live-quiz...");
+  try {
+    execSync("npm install live-quiz @anycable/serverless-js @netlify/functions", { cwd: dir, stdio: "pipe" });
+    s.stop("live-quiz installed!");
+  } catch {
+    s.stop("npm install failed — run `npm install live-quiz @anycable/serverless-js @netlify/functions` manually.");
   }
 
-  // ═══════════════════════════════════════════
-  // Step 3: Scaffold
-  // ═══════════════════════════════════════════
+  const isVercel = platform === "vercel";
+  const vercelEndpoints = isVercel
+    ? '\n  endpoints: { answer: "/api/quiz-answer", sync: "/api/quiz-sync" },'
+    : "";
 
-  const s = p.spinner();
-  s.start("Scaffolding project...");
-
-  mkdirSync(projectDir, { recursive: true });
-
-  // package.json
-  const pkg = {
-    name: config.projectName,
-    private: true,
-    type: "module",
-    scripts: {
-      dev: "vite",
-      build: "vite build",
-      preview: "vite preview",
-    },
-    dependencies: {
-      "reveal.js": "^5.2.1",
-      "live-quiz": "^0.1.0",
-      vite: "^6.0.0",
-    },
-  };
-  writeFileSync(join(projectDir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
-
-  // vite.config.js
-  writeFileSync(
-    join(projectDir, "vite.config.js"),
-    `import { defineConfig } from "vite";
-import { resolve } from "path";
-
-export default defineConfig({
-  build: {
-    rollupOptions: {
-      input: {
-        main: resolve(import.meta.dirname, "index.html"),
-        quiz: resolve(import.meta.dirname, "quiz.html"),
-      },
-    },
-  },
-});
-`,
-  );
-
-  const endpointsJs =
-    config.platform === "vercel"
-      ? '\n    endpoints: { answer: "/api/quiz-answer", sync: "/api/quiz-sync" },'
-      : "";
-
-  // main.js
-  writeFileSync(
-    join(projectDir, "main.js"),
-    `import Reveal from "reveal.js";
-import RevealLiveQuiz from "live-quiz";
-import "live-quiz/style.css";
-
-const deck = new Reveal({
-  plugins: [RevealLiveQuiz],
-  liveQuiz: {
-    wsUrl: "${urls.wsUrl}",
-    quizGroupId: "${config.projectName}",
-    quizUrl: \`\${window.location.origin}/quiz.html\`,${endpointsJs}
-  },
-  hash: true,
-});
-
-deck.initialize();
-`,
-  );
-
-  // index.html
-  writeFileSync(
-    join(projectDir, "index.html"),
-    `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Quiz Deck</title>
-    <link rel="stylesheet" href="node_modules/reveal.js/dist/reveal.css" />
-    <link rel="stylesheet" href="node_modules/reveal.js/dist/theme/black.css" />
-  </head>
-  <body>
-    <div class="reveal">
-      <div class="slides">
-
-        <section>
-          <h1>My Presentation</h1>
-          <p>With live audience quizzes!</p>
-        </section>
-
-        <!-- Quiz question — edit this! -->
-        <section data-quiz-id="q1"
-                 data-quiz-question="What's your favorite color?"
-                 data-quiz-options='[
-                   {"label":"A","text":"Red"},
-                   {"label":"B","text":"Blue","correct":true},
-                   {"label":"C","text":"Green"},
-                   {"label":"D","text":"Yellow"}
-                 ]'>
-        </section>
-
-        <!-- Results slide -->
-        <section data-quiz-results="q1"
-                 data-quiz-question="What's your favorite color?"
-                 data-quiz-options='[
-                   {"label":"A","text":"Red"},
-                   {"label":"B","text":"Blue","correct":true},
-                   {"label":"C","text":"Green"},
-                   {"label":"D","text":"Yellow"}
-                 ]'>
-        </section>
-
-        <section>
-          <h2>Thanks!</h2>
-        </section>
-
-      </div>
-    </div>
-    <script type="module" src="/main.js"></script>
-  </body>
-</html>
-`,
-  );
-
-  // quiz.html
-  writeFileSync(
-    join(projectDir, "quiz.html"),
-    `<!doctype html>
+  if (!existsSync(join(dir, "quiz.html"))) {
+    writeFileSync(
+      join(dir, "quiz.html"),
+      `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -389,17 +391,21 @@ deck.initialize();
   </body>
 </html>
 `,
-  );
+    );
+    p.log.success("Created quiz.html");
+  } else {
+    p.log.info("quiz.html already exists — skipped.");
+  }
 
-  // quiz.js
-  writeFileSync(
-    join(projectDir, "quiz.js"),
-    `import { createParticipantUI } from "live-quiz/participant";
+  if (!existsSync(join(dir, "quiz.js"))) {
+    writeFileSync(
+      join(dir, "quiz.js"),
+      `import { createParticipantUI } from "live-quiz/participant";
 import "live-quiz/participant.css";
 
 createParticipantUI("#quiz-root", {
   wsUrl: "${urls.wsUrl}",
-  quizGroupId: "${config.projectName}",${endpointsJs}
+  quizGroupId: "${quizGroupId}",${vercelEndpoints}
   questions: [
     {
       quizId: "q1",
@@ -414,123 +420,249 @@ createParticipantUI("#quiz-root", {
   ],
 });
 `,
-  );
+    );
+    p.log.success("Created quiz.js");
+  } else {
+    p.log.info("quiz.js already exists — skipped.");
+  }
 
-  // .gitignore
-  writeFileSync(
-    join(projectDir, ".gitignore"),
-    "node_modules\ndist\n.netlify\n.vercel\n.env\n",
-  );
-
-  // .env
-  writeFileSync(
-    join(projectDir, ".env"),
-    `ANYCABLE_BROADCAST_URL=${urls.broadcastUrl}\n`,
-  );
-
-  // Serverless functions
   const functionsSourceDir = join(__dirname, "functions");
 
-  if (config.platform === "netlify") {
-    const netlifyFnDir = join(projectDir, "netlify", "functions");
-    mkdirSync(netlifyFnDir, { recursive: true });
-    for (const f of ["quiz-answer.mts", "quiz-sync.mts", "shared.mts", "package.json"]) {
-      copyFileSync(join(functionsSourceDir, "netlify", f), join(netlifyFnDir, f));
+  if (platform === "netlify") {
+    const fnDir = join(dir, "netlify", "functions");
+    mkdirSync(fnDir, { recursive: true });
+    for (const f of ["quiz-answer.mts", "quiz-sync.mts", "shared.mts"]) {
+      if (!existsSync(join(fnDir, f))) {
+        copyFileSync(join(functionsSourceDir, "netlify", f), join(fnDir, f));
+      }
     }
+    p.log.success("Created netlify/functions/");
 
-    writeFileSync(
-      join(projectDir, "netlify.toml"),
-      `[build]\n  command = "npm run build"\n  publish = "dist"\n  functions = "netlify/functions"\n\n[build.environment]\n  NODE_VERSION = "22"\n`,
-    );
+    if (!existsSync(join(dir, "netlify.toml"))) {
+      writeFileSync(
+        join(dir, "netlify.toml"),
+        `[build]\n  command = "npm run build"\n  publish = "dist"\n  functions = "netlify/functions"\n\n[build.environment]\n  NODE_VERSION = "22"\n`,
+      );
+      p.log.success("Created netlify.toml");
+    }
   } else {
-    const apiDir = join(projectDir, "api");
+    const apiDir = join(dir, "api");
     mkdirSync(apiDir, { recursive: true });
-    for (const f of ["quiz-answer.ts", "quiz-sync.ts", "shared.ts", "package.json"]) {
-      copyFileSync(join(functionsSourceDir, "vercel", f), join(apiDir, f));
+    for (const f of ["quiz-answer.ts", "quiz-sync.ts", "shared.ts"]) {
+      if (!existsSync(join(apiDir, f))) {
+        copyFileSync(join(functionsSourceDir, "vercel", f), join(apiDir, f));
+      }
+    }
+    p.log.success("Created api/");
+  }
+
+  if (!existsSync(join(dir, ".env"))) {
+    writeFileSync(join(dir, ".env"), `ANYCABLE_BROADCAST_URL=${urls.broadcastUrl}\n`);
+    p.log.success("Created .env");
+  } else {
+    const envContent = readFileSync(join(dir, ".env"), "utf-8");
+    if (!envContent.includes("ANYCABLE_BROADCAST_URL")) {
+      appendFileSync(join(dir, ".env"), `\nANYCABLE_BROADCAST_URL=${urls.broadcastUrl}\n`);
+      p.log.success("Added ANYCABLE_BROADCAST_URL to .env");
+    } else {
+      p.log.info(".env already has ANYCABLE_BROADCAST_URL — skipped.");
     }
   }
 
-  s.stop("Project scaffolded!");
+  ensureGitignore(dir, "node_modules");
+  ensureGitignore(dir, "dist");
+  ensureGitignore(dir, ".vite");
+  ensureGitignore(dir, ".env");
 
-  // ═══════════════════════════════════════════
-  // Step 4: Install dependencies
-  // ═══════════════════════════════════════════
+  // Step 6 — Auto-modify HTML
 
-  s.start("Installing dependencies...");
-  try {
-    execSync("npm install", { cwd: projectDir, stdio: "pipe" });
-    s.stop("Dependencies installed!");
-  } catch {
-    s.stop("npm install failed — run it manually.");
+  const inserted = insertQuizSlides(dir, htmlFile);
+  if (inserted) {
+    p.log.success(`Added sample quiz slides to ${htmlFile}`);
+  } else {
+    p.log.warn(`Could not auto-insert quiz slides into ${htmlFile} — add them manually.`);
   }
 
-  // Git init
+  // Step 7 — Auto-inject plugin
+
+  const liveQuizConfig = [
+    `    plugins: [RevealLiveQuiz],`,
+    `    liveQuiz: {`,
+    `      wsUrl: "${urls.wsUrl}",`,
+    `      quizGroupId: "${quizGroupId}",`,
+    "      quizUrl: `${window.location.origin}/quiz.html`,",
+    isVercel ? '      endpoints: { answer: "/api/quiz-answer", sync: "/api/quiz-sync" },' : null,
+    `    },`,
+  ].filter(Boolean).join("\n");
+
+  if (jsEntry) {
+    // Existing JS entry — inject imports + config
+    const jsPath = join(dir, jsEntry);
+    let js = readFileSync(jsPath, "utf-8");
+
+    const importLines = 'import RevealLiveQuiz from "live-quiz";\nimport "live-quiz/style.css";';
+    const firstImport = js.match(/^import\s/m);
+    if (firstImport) {
+      js = js.slice(0, firstImport.index) + importLines + "\n" + js.slice(firstImport.index);
+    } else {
+      js = importLines + "\n\n" + js;
+    }
+
+    const pluginsMatch = js.match(/plugins\s*:\s*\[/);
+    if (pluginsMatch) {
+      const pos = pluginsMatch.index + pluginsMatch[0].length;
+      js = js.slice(0, pos) + "RevealLiveQuiz, " + js.slice(pos);
+      const initMatch = js.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
+      if (initMatch) {
+        const pos2 = initMatch.index + initMatch[0].length;
+        const lqOnly = liveQuizConfig.split("\n").filter(l => !l.includes("plugins")).join("\n");
+        js = js.slice(0, pos2) + "\n" + lqOnly + "\n" + js.slice(pos2);
+      }
+    } else {
+      const initMatch = js.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
+      if (initMatch) {
+        const pos = initMatch.index + initMatch[0].length;
+        js = js.slice(0, pos) + "\n" + liveQuizConfig + "\n" + js.slice(pos);
+      }
+    }
+
+    writeFileSync(jsPath, js);
+    p.log.success(`Updated ${jsEntry} with live-quiz plugin`);
+
+  } else {
+    // Standalone HTML — extract inline script to main.js + set up Vite
+
+    const htmlPath = join(dir, htmlFile);
+    let html = readFileSync(htmlPath, "utf-8");
+
+    const scriptRe = /<script(?![^>]*\bsrc\b)[^>]*>([\s\S]*?)<\/script>/g;
+    let scriptMatch;
+    let revealScript = null;
+    while ((scriptMatch = scriptRe.exec(html)) !== null) {
+      if (REVEAL_INIT_RE.test(scriptMatch[1])) {
+        revealScript = scriptMatch;
+        break;
+      }
+    }
+
+    if (revealScript) {
+      const body = revealScript[1];
+      const initMatch = body.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
+
+      if (initMatch) {
+        let depth = 1, start = initMatch.index + initMatch[0].length, idx = start;
+        while (idx < body.length && depth > 0) {
+          if (body[idx] === "{") depth++;
+          else if (body[idx] === "}") depth--;
+          idx++;
+        }
+        const configInner = body.slice(start, idx - 1).trim();
+
+        const mainJs = [
+          'import Reveal from "reveal.js";',
+          'import "reveal.js/dist/reveal.css";',
+          'import RevealLiveQuiz from "live-quiz";',
+          'import "live-quiz/style.css";',
+          "",
+          "Reveal.initialize({",
+          liveQuizConfig,
+          `    ${configInner}`,
+          "});",
+          "",
+        ].join("\n");
+
+        writeFileSync(join(dir, "main.js"), mainJs);
+        p.log.success("Created main.js with live-quiz plugin");
+
+        // Remove CDN-loaded reveal.js assets
+        html = html.replace(/\s*<link[^>]*href="https?:\/\/[^"]*reveal[^"]*"[^>]*>/g, "");
+        html = html.replace(/\s*<script[^>]*src="https?:\/\/[^"]*reveal[^"]*"[^>]*>\s*<\/script>/g, "");
+
+        // Replace inline script with module entry
+        html = html.replace(revealScript[0], '<script type="module" src="/main.js"></script>');
+
+        writeFileSync(htmlPath, html);
+        p.log.success(`Updated ${htmlFile} — switched to module imports`);
+      }
+    } else {
+      p.log.warn(`Could not find Reveal.initialize() in ${htmlFile} — add plugin config manually.`);
+    }
+
+    // Set up Vite if not already present
+    if (!viteConfig) {
+      s.start("Installing vite...");
+      try {
+        execSync("npm install -D vite", { cwd: dir, stdio: "pipe" });
+        s.stop("Vite installed!");
+      } catch {
+        s.stop("Could not install vite — run `npm install -D vite` manually.");
+      }
+
+      writeFileSync(
+        join(dir, "vite.config.js"),
+        [
+          'import { resolve } from "path";',
+          "",
+          "export default {",
+          "  build: {",
+          "    rollupOptions: {",
+          "      input: {",
+          `        main: resolve(import.meta.dirname, "${htmlFile}"),`,
+          '        quiz: resolve(import.meta.dirname, "quiz.html"),',
+          "      },",
+          "    },",
+          "  },",
+          "};",
+          "",
+        ].join("\n"),
+      );
+      p.log.success("Created vite.config.js");
+
+      pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+      pkg.scripts = pkg.scripts || {};
+      if (!pkg.scripts.dev) pkg.scripts.dev = "vite";
+      if (!pkg.scripts.build) pkg.scripts.build = "vite build";
+      if (!pkg.scripts.preview) pkg.scripts.preview = "vite preview";
+      writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+      p.log.success("Added dev/build/preview scripts to package.json");
+    }
+  }
+
+  // Step 8 — Vite config snippet (only if user already had one — they need to add quiz.html entry)
+
+  if (viteConfig) {
+    p.note(
+      [
+        color.dim("// Add quiz.html as a second entry point:"),
+        color.cyan("build: {"),
+        color.cyan("  rollupOptions: {"),
+        color.cyan("    input: {"),
+        color.cyan(`      main: resolve(import.meta.dirname, "${htmlFile}"),`),
+        color.cyan('      quiz: resolve(import.meta.dirname, "quiz.html"),'),
+        color.cyan("    },"),
+        color.cyan("  },"),
+        color.cyan("},"),
+      ].join("\n"),
+      `Update ${viteConfig}`,
+    );
+  }
+
+  // Step 9 — Deploy guidance
+
   let gitRemoteUrl = "";
-  if (!existsSync(join(projectDir, ".git"))) {
-    try {
-      execSync('git init && git add -A && git commit -m "Initial commit from create-live-quiz"', {
-        cwd: projectDir,
-        stdio: "pipe",
-      });
-      p.log.success("Git repo initialized.");
-    } catch {
-      // skip
-    }
-  }
-
-  // Check for existing remote
   try {
-    gitRemoteUrl = execSync("git remote get-url origin", { cwd: projectDir, stdio: "pipe" })
+    gitRemoteUrl = execSync("git remote get-url origin", { cwd: dir, stdio: "pipe" })
       .toString()
       .trim();
   } catch {
-    // no remote yet
-  }
-
-  // ═══════════════════════════════════════════
-  // Step 5: Push to GitHub
-  // ═══════════════════════════════════════════
-
-  if (!gitRemoteUrl) {
-    p.note(
-      [
-        `Before deploying, push your project to GitHub:`,
-        "",
-        `  1. Create a new repo on GitHub (e.g. ${color.cyan(config.projectName)})`,
-        `  2. Then run:`,
-        "",
-        `     ${color.dim("cd")} ${config.projectName}`,
-        `     ${color.dim("git remote add origin")} git@github.com:YOUR_USER/${config.projectName}.git`,
-        `     ${color.dim("git push -u origin main")}`,
-      ].join("\n"),
-      "Push to GitHub",
-    );
-
-    await p.confirm({
-      message: "Pushed to GitHub? (or skip deploy for now)",
-      active: "Continue",
-      inactive: "Waiting...",
-    });
-
-    // Re-check for remote
-    try {
-      gitRemoteUrl = execSync("git remote get-url origin", { cwd: projectDir, stdio: "pipe" })
-        .toString()
-        .trim();
-    } catch {
-      // still no remote
-    }
+    // no remote
   }
 
   const repoName = gitRemoteUrl
     ? gitRemoteUrl.replace(/.*[:/](.+\/.+?)(?:\.git)?$/, "$1")
-    : config.projectName;
+    : quizGroupId;
 
-  // ═══════════════════════════════════════════
-  // Step 6: Platform deploy
-  // ═══════════════════════════════════════════
-
-  if (config.platform === "netlify") {
+  if (platform === "netlify") {
     const hasNetlify = hasCommand("netlify");
 
     if (hasNetlify) {
@@ -542,7 +674,7 @@ createParticipantUI("#quiz-root", {
       if (useNetlifyCli && !p.isCancel(useNetlifyCli)) {
         p.log.step("Running `netlify init`...");
         try {
-          run("netlify init", projectDir);
+          run("netlify init", dir);
         } catch {
           p.log.warn("netlify init failed — you can run it later.");
         }
@@ -550,7 +682,7 @@ createParticipantUI("#quiz-root", {
         s.start("Setting environment variables...");
         try {
           execSync(`netlify env:set ANYCABLE_BROADCAST_URL "${urls.broadcastUrl}"`, {
-            cwd: projectDir,
+            cwd: dir,
             stdio: "pipe",
           });
           s.stop("Environment variables set on Netlify!");
@@ -567,7 +699,7 @@ createParticipantUI("#quiz-root", {
           s.start("Building and deploying...");
           try {
             execSync("npm run build && netlify deploy --prod --dir=dist", {
-              cwd: projectDir,
+              cwd: dir,
               stdio: "pipe",
             });
             s.stop("Deployed to Netlify!");
@@ -577,15 +709,12 @@ createParticipantUI("#quiz-root", {
         }
       }
     } else {
-      p.log.info("Opening Netlify to create a new site...");
-      openUrl("https://app.netlify.com/start");
-
       p.note(
         [
           `1. Click ${color.bold("Import an existing project")}`,
           gitRemoteUrl
             ? `2. Connect your GitHub repo: ${color.cyan(repoName)}`
-            : `2. Connect your GitHub repo (push to GitHub first if you haven't)`,
+            : `2. Connect your GitHub repo`,
           `3. Build command: ${color.cyan("npm run build")}`,
           `4. Publish directory: ${color.cyan("dist")}`,
           `5. Add environment variable:`,
@@ -598,10 +727,9 @@ createParticipantUI("#quiz-root", {
       );
     }
   } else {
-    // Vercel
-    const hasVercel = hasCommand("vercel");
+    const hasVercelCli = hasCommand("vercel");
 
-    if (hasVercel) {
+    if (hasVercelCli) {
       const useVercelCli = await p.confirm({
         message: "Vercel CLI detected. Link and deploy now?",
         initialValue: true,
@@ -610,7 +738,7 @@ createParticipantUI("#quiz-root", {
       if (useVercelCli && !p.isCancel(useVercelCli)) {
         p.log.step("Running `vercel link`...");
         try {
-          run("vercel link", projectDir);
+          run("vercel link", dir);
         } catch {
           p.log.warn("vercel link failed — you can run it later.");
         }
@@ -619,7 +747,7 @@ createParticipantUI("#quiz-root", {
         try {
           execSync(
             `echo "${urls.broadcastUrl}" | vercel env add ANYCABLE_BROADCAST_URL production`,
-            { cwd: projectDir, stdio: "pipe" },
+            { cwd: dir, stdio: "pipe" },
           );
           s.stop("Environment variables set on Vercel!");
         } catch {
@@ -634,7 +762,7 @@ createParticipantUI("#quiz-root", {
         if (deploy && !p.isCancel(deploy)) {
           s.start("Deploying...");
           try {
-            execSync("vercel --prod", { cwd: projectDir, stdio: "pipe" });
+            execSync("vercel --prod", { cwd: dir, stdio: "pipe" });
             s.stop("Deployed to Vercel!");
           } catch {
             s.stop("Deploy failed — try `vercel --prod` manually.");
@@ -642,15 +770,12 @@ createParticipantUI("#quiz-root", {
         }
       }
     } else {
-      p.log.info("Opening Vercel to create a new project...");
-      openUrl("https://vercel.com/new");
-
       p.note(
         [
           `1. Click ${color.bold("Import Git Repository")}`,
           gitRemoteUrl
             ? `2. Select your repo: ${color.cyan(repoName)}`
-            : `2. Select your repo (push to GitHub first if you haven't)`,
+            : `2. Select your repo`,
           `3. Framework preset: ${color.cyan("Vite")}`,
           `4. Add environment variable:`,
           `   ${color.cyan("ANYCABLE_BROADCAST_URL")} = ${urls.broadcastUrl}`,
@@ -663,24 +788,22 @@ createParticipantUI("#quiz-root", {
     }
   }
 
-  // ═══════════════════════════════════════════
-  // Done
-  // ═══════════════════════════════════════════
+  // Step 10 — Done
 
   const nextSteps = [
-    `cd ${config.projectName}`,
-    "npm run dev",
-    "",
-    `Edit quiz slides in ${color.bold("index.html")}`,
-    `Edit participant questions in ${color.bold("quiz.js")}`,
-  ].join("\n");
+    viteConfig ? `1. Update ${color.bold(viteConfig)} to add quiz.html entry point (see above)` : null,
+    `${viteConfig ? "2" : "1"}. Run ${color.bold("npm run dev")} and try your quiz!`,
+    `${viteConfig ? "3" : "2"}. Commit and push to deploy`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   p.note(nextSteps, "Next steps");
 
   p.outro(color.green("Happy quizzing! 🎯"));
 }
 
-main().catch((err) => {
+main().catch(err => {
   p.log.error(err.message);
   process.exit(1);
 });
