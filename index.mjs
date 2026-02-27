@@ -360,10 +360,10 @@ async function main() {
 
   s.start("Installing live-quiz...");
   try {
-    execSync("npm install live-quiz @anycable/serverless-js @netlify/functions", { cwd: dir, stdio: "pipe" });
+    execSync("npm install live-quiz @anycable/serverless-js", { cwd: dir, stdio: "pipe" });
     s.stop("live-quiz installed!");
   } catch {
-    s.stop("npm install failed — run `npm install live-quiz @anycable/serverless-js @netlify/functions` manually.");
+    s.stop("npm install failed — run `npm install live-quiz @anycable/serverless-js` manually.");
   }
 
   const isVercel = platform === "vercel";
