@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * create-live-quiz — Add live audience quizzes to your Reveal.js presentation
+ * create-live-quiz — Add live audience quizzes to your presentation
  *
+ * Supports Reveal.js and Slidev frameworks.
  * Usage: cd your-presentation && npx create-live-quiz
  */
 
@@ -72,6 +73,12 @@ function findJsEntry(dir, htmlContent) {
       return name;
     }
   }
+  return null;
+}
+
+function detectFramework(dir) {
+  if (existsSync(join(dir, "slides.md"))) return "slidev";
+  if (findRevealHtml(dir)) return "revealjs";
   return null;
 }
 
@@ -148,6 +155,62 @@ function ensureGitignore(dir, entry) {
   }
 }
 
+function modifySlidesConfig(dir, wsUrl, quizGroupId, isVercel) {
+  const slidesPath = join(dir, "slides.md");
+  let content = readFileSync(slidesPath, "utf-8");
+
+  const addonsYaml = "addons:\n  - slidev-addon-live-quiz";
+  const liveQuizYaml = [
+    "liveQuiz:",
+    `  wsUrl: ${wsUrl}`,
+    `  quizGroupId: ${quizGroupId}`,
+    "  quizUrl: /quiz.html",
+    isVercel ? "  endpoints:\n    answer: /api/quiz-answer\n    sync: /api/quiz-sync" : null,
+  ].filter(Boolean).join("\n");
+
+  if (content.startsWith("---")) {
+    const closingIdx = content.indexOf("\n---", 3);
+    if (closingIdx !== -1) {
+      const frontmatter = content.slice(4, closingIdx);
+      let additions = "";
+      if (!frontmatter.includes("addons:")) additions += addonsYaml + "\n";
+      if (!frontmatter.includes("liveQuiz:")) additions += liveQuizYaml + "\n";
+      if (additions) {
+        content = content.slice(0, closingIdx) + "\n" + additions + content.slice(closingIdx);
+      }
+    }
+  } else {
+    content = `---\n${addonsYaml}\n${liveQuizYaml}\n---\n\n${content}`;
+  }
+
+  writeFileSync(slidesPath, content);
+}
+
+const SLIDEV_QUIZ_SLIDES = `
+---
+layout: quiz
+quizId: q1
+question: What's your favorite color?
+titleText: Pop quiz!
+options:
+  - { label: A, text: Red }
+  - { label: B, text: Blue, correct: true }
+  - { label: C, text: Green }
+  - { label: D, text: Yellow }
+---
+
+---
+layout: quiz-results
+quizId: q1
+question: What's your favorite color?
+options:
+  - { label: A, text: Red }
+  - { label: B, text: Blue, correct: true }
+  - { label: C, text: Green }
+  - { label: D, text: Yellow }
+---
+`;
+
 // —— Main ——
 
 async function main() {
@@ -155,67 +218,130 @@ async function main() {
 
   const dir = process.cwd();
 
-  // Step 1 — Detect project
+  // Step 1 — Detect framework
 
   const s = p.spinner();
-  s.start("Detecting Reveal.js project...");
+  s.start("Detecting project...");
 
-  const htmlFile = findRevealHtml(dir);
-  if (!htmlFile) {
-    s.stop(color.red("No HTML file with class=\"reveal\" found."));
-    p.log.error("Could not find a Reveal.js HTML file in this directory.");
-    return p.cancel("No Reveal.js HTML detected.");
-  }
+  let framework = detectFramework(dir);
 
-  const pkgPath = join(dir, "package.json");
+  let htmlFile, htmlContent, jsEntry, viteConfig;
+  let quizGroupId;
   let pkg;
   let needsInit = false;
+  const pkgPath = join(dir, "package.json");
+  let platform = detectPlatform(dir);
 
-  if (!existsSync(pkgPath)) {
-    needsInit = true;
-  } else {
-    try {
-      pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-    } catch {
-      s.stop(color.red("Could not parse package.json."));
-      return p.cancel("Invalid package.json.");
+  if (framework === "revealjs") {
+    htmlFile = findRevealHtml(dir);
+
+    if (!existsSync(pkgPath)) {
+      needsInit = true;
+    } else {
+      try {
+        pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+      } catch {
+        s.stop(color.red("Could not parse package.json."));
+        return p.cancel("Invalid package.json.");
+      }
+      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+      if (!deps["reveal.js"]) needsInit = true;
     }
-    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-    if (!deps["reveal.js"]) needsInit = true;
-  }
 
-  if (needsInit) {
-    s.stop(color.green(`Found ${htmlFile}`));
+    if (needsInit) {
+      s.stop(color.green(`Found ${htmlFile}`));
+
+      if (!existsSync(pkgPath)) {
+        p.log.info("No package.json found — initializing project...");
+        execSync("npm init -y", { cwd: dir, stdio: "pipe" });
+      }
+
+      p.log.info("Installing reveal.js...");
+      execSync("npm install reveal.js", { cwd: dir, stdio: "pipe" });
+      pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+      p.log.success("Project initialized with reveal.js");
+    }
+
+    htmlContent = readFileSync(join(dir, htmlFile), "utf-8");
+    jsEntry = findJsEntry(dir, htmlContent);
+    viteConfig = detectVite(dir);
+    quizGroupId = pkg.name || basename(dir);
+
+    if (!needsInit) s.stop(color.green("Reveal.js project detected!"));
+
+    p.note(
+      [
+        `HTML file:   ${color.cyan(htmlFile)}`,
+        `JS entry:    ${jsEntry ? color.cyan(jsEntry) : color.dim("not found")}`,
+        `Platform:    ${platform ? color.cyan(platform) : color.dim("not detected")}`,
+        `Vite:        ${viteConfig ? color.cyan(viteConfig) : color.dim("not detected")}`,
+        `Quiz group:  ${color.cyan(quizGroupId)}`,
+      ].join("\n"),
+      "Detected project",
+    );
+
+  } else if (framework === "slidev") {
+    if (existsSync(pkgPath)) {
+      try {
+        pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+      } catch {
+        s.stop(color.red("Could not parse package.json."));
+        return p.cancel("Invalid package.json.");
+      }
+    }
+
+    quizGroupId = pkg?.name || basename(dir);
+    s.stop(color.green("Slidev project detected!"));
 
     if (!existsSync(pkgPath)) {
       p.log.info("No package.json found — initializing project...");
       execSync("npm init -y", { cwd: dir, stdio: "pipe" });
+      pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
     }
 
-    p.log.info("Installing reveal.js...");
-    execSync("npm install reveal.js", { cwd: dir, stdio: "pipe" });
-    pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-    p.log.success("Project initialized with reveal.js");
+    p.note(
+      [
+        `Framework:   ${color.cyan("Slidev")}`,
+        `Slides:      ${color.cyan("slides.md")}`,
+        `Platform:    ${platform ? color.cyan(platform) : color.dim("not detected")}`,
+        `Quiz group:  ${color.cyan(quizGroupId)}`,
+      ].join("\n"),
+      "Detected project",
+    );
+
+  } else {
+    s.stop(color.yellow("Could not auto-detect framework."));
+
+    const choice = await p.select({
+      message: "What framework are you using?",
+      options: [
+        { value: "revealjs", label: "Reveal.js" },
+        { value: "slidev", label: "Slidev" },
+      ],
+    });
+    if (p.isCancel(choice)) return p.cancel("Cancelled.");
+    framework = choice;
+
+    if (framework === "revealjs") {
+      p.log.error("Could not find a Reveal.js HTML file (with class=\"reveal\") in this directory.");
+      return p.cancel("No Reveal.js HTML detected.");
+    }
+
+    // Slidev selected manually
+    if (existsSync(pkgPath)) {
+      try {
+        pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+      } catch {
+        return p.cancel("Invalid package.json.");
+      }
+    } else {
+      p.log.info("No package.json found — initializing project...");
+      execSync("npm init -y", { cwd: dir, stdio: "pipe" });
+      pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+    }
+
+    quizGroupId = pkg?.name || basename(dir);
   }
-
-  const htmlContent = readFileSync(join(dir, htmlFile), "utf-8");
-  const jsEntry = findJsEntry(dir, htmlContent);
-  let platform = detectPlatform(dir);
-  const viteConfig = detectVite(dir);
-  const quizGroupId = pkg.name || basename(dir);
-
-  if (!needsInit) s.stop(color.green("Reveal.js project detected!"));
-
-  p.note(
-    [
-      `HTML file:   ${color.cyan(htmlFile)}`,
-      `JS entry:    ${jsEntry ? color.cyan(jsEntry) : color.dim("not found")}`,
-      `Platform:    ${platform ? color.cyan(platform) : color.dim("not detected")}`,
-      `Vite:        ${viteConfig ? color.cyan(viteConfig) : color.dim("not detected")}`,
-      `Quiz group:  ${color.cyan(quizGroupId)}`,
-    ].join("\n"),
-    "Detected project",
-  );
 
   // Step 2 — Platform (if not auto-detected)
 
@@ -254,7 +380,7 @@ async function main() {
     p.note(
       [
         `1. Click ${color.bold("New Cable")}`,
-        `2. Name it anything (e.g. ${color.cyan("revealjs-cable")})`,
+        `2. Name it anything (e.g. ${color.cyan("my-cable")})`,
         `3. Under ${color.bold("Your backend")}, pick ${color.bold("JavaScript")}`,
         `4. Click ${color.bold("Next")}`,
       ].join("\n"),
@@ -319,22 +445,33 @@ async function main() {
       },
     );
 
-    p.note(
-      [
-        `HTML file:      ${color.cyan(htmlFile)}`,
-        `JS entry:       ${jsEntry ? color.cyan(jsEntry) : color.dim("(manual setup)")}`,
-        `Platform:       ${color.cyan(platform)}`,
-        `WebSocket URL:  ${color.cyan(urls.wsUrl)}`,
-        `Broadcast URL:  ${color.cyan(urls.broadcastUrl)}`,
-        `Quiz group:     ${color.cyan(quizGroupId)}`,
-      ].join("\n"),
-      "Review your settings",
-    );
+    const reviewLines = framework === "revealjs"
+      ? [
+          `HTML file:      ${color.cyan(htmlFile)}`,
+          `JS entry:       ${jsEntry ? color.cyan(jsEntry) : color.dim("(manual setup)")}`,
+          `Platform:       ${color.cyan(platform)}`,
+          `WebSocket URL:  ${color.cyan(urls.wsUrl)}`,
+          `Broadcast URL:  ${color.cyan(urls.broadcastUrl)}`,
+          `Quiz group:     ${color.cyan(quizGroupId)}`,
+        ]
+      : [
+          `Framework:      ${color.cyan("Slidev")}`,
+          `Platform:       ${color.cyan(platform)}`,
+          `WebSocket URL:  ${color.cyan(urls.wsUrl)}`,
+          `Broadcast URL:  ${color.cyan(urls.broadcastUrl)}`,
+          `Quiz group:     ${color.cyan(quizGroupId)}`,
+        ];
+
+    p.note(reviewLines.join("\n"), "Review your settings");
+
+    const confirmLabel = framework === "revealjs"
+      ? "Yes, install live-quiz"
+      : "Yes, install slidev-addon-live-quiz";
 
     const reviewAction = await p.select({
       message: "Look good?",
       options: [
-        { value: "confirm", label: "Yes, install live-quiz" },
+        { value: "confirm", label: confirmLabel },
         { value: "edit_platform", label: "Change platform" },
         { value: "edit_urls", label: "Change AnyCable URLs" },
       ],
@@ -358,23 +495,24 @@ async function main() {
 
   // Step 5 — Install + create files
 
-  s.start("Installing live-quiz...");
-  try {
-    execSync("npm install live-quiz @anycable/serverless-js", { cwd: dir, stdio: "pipe" });
-    s.stop("live-quiz installed!");
-  } catch {
-    s.stop("npm install failed — run `npm install live-quiz @anycable/serverless-js` manually.");
-  }
-
   const isVercel = platform === "vercel";
   const vercelEndpoints = isVercel
     ? '\n  endpoints: { answer: "/api/quiz-answer", sync: "/api/quiz-sync" },'
     : "";
 
-  if (!existsSync(join(dir, "quiz.html"))) {
-    writeFileSync(
-      join(dir, "quiz.html"),
-      `<!doctype html>
+  if (framework === "revealjs") {
+    s.start("Installing live-quiz...");
+    try {
+      execSync("npm install live-quiz @anycable/serverless-js", { cwd: dir, stdio: "pipe" });
+      s.stop("live-quiz installed!");
+    } catch {
+      s.stop("npm install failed — run `npm install live-quiz @anycable/serverless-js` manually.");
+    }
+
+    if (!existsSync(join(dir, "quiz.html"))) {
+      writeFileSync(
+        join(dir, "quiz.html"),
+        `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -391,16 +529,16 @@ async function main() {
   </body>
 </html>
 `,
-    );
-    p.log.success("Created quiz.html");
-  } else {
-    p.log.info("quiz.html already exists — skipped.");
-  }
+      );
+      p.log.success("Created quiz.html");
+    } else {
+      p.log.info("quiz.html already exists — skipped.");
+    }
 
-  if (!existsSync(join(dir, "quiz.js"))) {
-    writeFileSync(
-      join(dir, "quiz.js"),
-      `import { createParticipantUI } from "live-quiz/participant";
+    if (!existsSync(join(dir, "quiz.js"))) {
+      writeFileSync(
+        join(dir, "quiz.js"),
+        `import { createParticipantUI } from "live-quiz/participant";
 import "live-quiz/participant.css";
 
 createParticipantUI("#quiz-root", {
@@ -408,42 +546,72 @@ createParticipantUI("#quiz-root", {
   quizGroupId: "${quizGroupId}",${vercelEndpoints}
 });
 `,
-    );
-    p.log.success("Created quiz.js");
+      );
+      p.log.success("Created quiz.js");
+    } else {
+      p.log.info("quiz.js already exists — skipped.");
+    }
   } else {
-    p.log.info("quiz.js already exists — skipped.");
+    // Slidev
+    s.start("Installing slidev-addon-live-quiz...");
+    try {
+      execSync("npm install slidev-addon-live-quiz @anycable/serverless-js", { cwd: dir, stdio: "pipe" });
+      s.stop("slidev-addon-live-quiz installed!");
+    } catch {
+      s.stop("npm install failed — run `npm install slidev-addon-live-quiz @anycable/serverless-js` manually.");
+    }
+
+    // Copy quiz.html to public/
+    mkdirSync(join(dir, "public"), { recursive: true });
+    const addonPublicDir = join(dir, "node_modules", "slidev-addon-live-quiz", "public");
+
+    if (!existsSync(join(dir, "public", "quiz.html"))) {
+      copyFileSync(join(addonPublicDir, "quiz.html"), join(dir, "public", "quiz.html"));
+      p.log.success("Copied quiz.html to public/");
+    } else {
+      p.log.info("public/quiz.html already exists — skipped.");
+    }
+
+    // Copy _redirects for Netlify
+    if (!isVercel && !existsSync(join(dir, "public", "_redirects"))) {
+      copyFileSync(join(addonPublicDir, "_redirects"), join(dir, "public", "_redirects"));
+      p.log.success("Copied _redirects to public/");
+    }
   }
 
-  const functionsSourceDir = join(__dirname, "functions");
+  // Copy serverless functions (shared source from live-quiz)
+  const functionsSource = join(dir, "node_modules", "live-quiz", "functions");
 
   if (platform === "netlify") {
     const fnDir = join(dir, "netlify", "functions");
     mkdirSync(fnDir, { recursive: true });
-    for (const f of ["quiz-answer.mts", "quiz-sync.mts", "shared.mts"]) {
+    for (const f of readdirSync(join(functionsSource, "netlify"))) {
       if (!existsSync(join(fnDir, f))) {
-        copyFileSync(join(functionsSourceDir, "netlify", f), join(fnDir, f));
+        copyFileSync(join(functionsSource, "netlify", f), join(fnDir, f));
       }
     }
     p.log.success("Created netlify/functions/");
 
     if (!existsSync(join(dir, "netlify.toml"))) {
+      const buildCmd = framework === "slidev" ? "npx slidev build" : "npm run build";
       writeFileSync(
         join(dir, "netlify.toml"),
-        `[build]\n  command = "npm run build"\n  publish = "dist"\n  functions = "netlify/functions"\n\n[build.environment]\n  NODE_VERSION = "22"\n`,
+        `[build]\n  command = "${buildCmd}"\n  publish = "dist"\n  functions = "netlify/functions"\n\n[build.environment]\n  NODE_VERSION = "22"\n`,
       );
       p.log.success("Created netlify.toml");
     }
   } else {
     const apiDir = join(dir, "api");
     mkdirSync(apiDir, { recursive: true });
-    for (const f of ["quiz-answer.ts", "quiz-sync.ts", "shared.ts"]) {
+    for (const f of readdirSync(join(functionsSource, "vercel"))) {
       if (!existsSync(join(apiDir, f))) {
-        copyFileSync(join(functionsSourceDir, "vercel", f), join(apiDir, f));
+        copyFileSync(join(functionsSource, "vercel", f), join(apiDir, f));
       }
     }
     p.log.success("Created api/");
   }
 
+  // .env
   if (!existsSync(join(dir, ".env"))) {
     writeFileSync(join(dir, ".env"), `ANYCABLE_BROADCAST_URL=${urls.broadcastUrl}\n`);
     p.log.success("Created .env");
@@ -462,180 +630,214 @@ createParticipantUI("#quiz-root", {
   ensureGitignore(dir, ".vite");
   ensureGitignore(dir, ".env");
 
-  // Step 6 — Auto-modify HTML
+  // Step 6 — Framework-specific modifications
 
-  const inserted = insertQuizSlides(dir, htmlFile);
-  if (inserted) {
-    p.log.success(`Added sample quiz slides to ${htmlFile}`);
-  } else {
-    p.log.warn(`Could not auto-insert quiz slides into ${htmlFile} — add them manually.`);
-  }
-
-  // Step 7 — Auto-inject plugin
-
-  const liveQuizConfig = [
-    `    plugins: [RevealLiveQuiz],`,
-    `    liveQuiz: {`,
-    `      wsUrl: "${urls.wsUrl}",`,
-    `      quizGroupId: "${quizGroupId}",`,
-    "      quizUrl: `${window.location.origin}/quiz.html`,",
-    isVercel ? '      endpoints: { answer: "/api/quiz-answer", sync: "/api/quiz-sync" },' : null,
-    `    },`,
-  ].filter(Boolean).join("\n");
-
-  if (jsEntry) {
-    // Existing JS entry — inject imports + config
-    const jsPath = join(dir, jsEntry);
-    let js = readFileSync(jsPath, "utf-8");
-
-    const importLines = 'import RevealLiveQuiz from "live-quiz";\nimport "live-quiz/style.css";';
-    const firstImport = js.match(/^import\s/m);
-    if (firstImport) {
-      js = js.slice(0, firstImport.index) + importLines + "\n" + js.slice(firstImport.index);
+  if (framework === "revealjs") {
+    // Auto-modify HTML
+    const inserted = insertQuizSlides(dir, htmlFile);
+    if (inserted) {
+      p.log.success(`Added sample quiz slides to ${htmlFile}`);
     } else {
-      js = importLines + "\n\n" + js;
+      p.log.warn(`Could not auto-insert quiz slides into ${htmlFile} — add them manually.`);
     }
 
-    const pluginsMatch = js.match(/plugins\s*:\s*\[/);
-    if (pluginsMatch) {
-      const pos = pluginsMatch.index + pluginsMatch[0].length;
-      js = js.slice(0, pos) + "RevealLiveQuiz, " + js.slice(pos);
-      const initMatch = js.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
-      if (initMatch) {
-        const pos2 = initMatch.index + initMatch[0].length;
-        const lqOnly = liveQuizConfig.split("\n").filter(l => !l.includes("plugins")).join("\n");
-        js = js.slice(0, pos2) + "\n" + lqOnly + "\n" + js.slice(pos2);
+    // Auto-inject plugin
+    const liveQuizConfig = [
+      `    plugins: [RevealLiveQuiz],`,
+      `    liveQuiz: {`,
+      `      wsUrl: "${urls.wsUrl}",`,
+      `      quizGroupId: "${quizGroupId}",`,
+      "      quizUrl: `${window.location.origin}/quiz.html`,",
+      isVercel ? '      endpoints: { answer: "/api/quiz-answer", sync: "/api/quiz-sync" },' : null,
+      `    },`,
+    ].filter(Boolean).join("\n");
+
+    if (jsEntry) {
+      // Existing JS entry — inject imports + config
+      const jsPath = join(dir, jsEntry);
+      let js = readFileSync(jsPath, "utf-8");
+
+      const importLines = 'import RevealLiveQuiz from "live-quiz";\nimport "live-quiz/style.css";';
+      const firstImport = js.match(/^import\s/m);
+      if (firstImport) {
+        js = js.slice(0, firstImport.index) + importLines + "\n" + js.slice(firstImport.index);
+      } else {
+        js = importLines + "\n\n" + js;
       }
-    } else {
-      const initMatch = js.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
-      if (initMatch) {
-        const pos = initMatch.index + initMatch[0].length;
-        js = js.slice(0, pos) + "\n" + liveQuizConfig + "\n" + js.slice(pos);
-      }
-    }
 
-    writeFileSync(jsPath, js);
-    p.log.success(`Updated ${jsEntry} with live-quiz plugin`);
-
-  } else {
-    // Standalone HTML — extract inline script to main.js + set up Vite
-
-    const htmlPath = join(dir, htmlFile);
-    let html = readFileSync(htmlPath, "utf-8");
-
-    const scriptRe = /<script(?![^>]*\bsrc\b)[^>]*>([\s\S]*?)<\/script>/g;
-    let scriptMatch;
-    let revealScript = null;
-    while ((scriptMatch = scriptRe.exec(html)) !== null) {
-      if (REVEAL_INIT_RE.test(scriptMatch[1])) {
-        revealScript = scriptMatch;
-        break;
-      }
-    }
-
-    if (revealScript) {
-      const body = revealScript[1];
-      const initMatch = body.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
-
-      if (initMatch) {
-        let depth = 1, start = initMatch.index + initMatch[0].length, idx = start;
-        while (idx < body.length && depth > 0) {
-          if (body[idx] === "{") depth++;
-          else if (body[idx] === "}") depth--;
-          idx++;
+      const pluginsMatch = js.match(/plugins\s*:\s*\[/);
+      if (pluginsMatch) {
+        const pos = pluginsMatch.index + pluginsMatch[0].length;
+        js = js.slice(0, pos) + "RevealLiveQuiz, " + js.slice(pos);
+        const initMatch = js.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
+        if (initMatch) {
+          const pos2 = initMatch.index + initMatch[0].length;
+          const lqOnly = liveQuizConfig.split("\n").filter(l => !l.includes("plugins")).join("\n");
+          js = js.slice(0, pos2) + "\n" + lqOnly + "\n" + js.slice(pos2);
         }
-        const configInner = body.slice(start, idx - 1).trim();
-
-        const mainJs = [
-          'import Reveal from "reveal.js";',
-          'import "reveal.js/dist/reveal.css";',
-          'import RevealLiveQuiz from "live-quiz";',
-          'import "live-quiz/style.css";',
-          "",
-          "Reveal.initialize({",
-          liveQuizConfig,
-          `    ${configInner}`,
-          "});",
-          "",
-        ].join("\n");
-
-        writeFileSync(join(dir, "main.js"), mainJs);
-        p.log.success("Created main.js with live-quiz plugin");
-
-        // Remove CDN-loaded reveal.js assets
-        html = html.replace(/\s*<link[^>]*href="https?:\/\/[^"]*reveal[^"]*"[^>]*>/g, "");
-        html = html.replace(/\s*<script[^>]*src="https?:\/\/[^"]*reveal[^"]*"[^>]*>\s*<\/script>/g, "");
-
-        // Replace inline script with module entry
-        html = html.replace(revealScript[0], '<script type="module" src="/main.js"></script>');
-
-        writeFileSync(htmlPath, html);
-        p.log.success(`Updated ${htmlFile} — switched to module imports`);
+      } else {
+        const initMatch = js.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
+        if (initMatch) {
+          const pos = initMatch.index + initMatch[0].length;
+          js = js.slice(0, pos) + "\n" + liveQuizConfig + "\n" + js.slice(pos);
+        }
       }
+
+      writeFileSync(jsPath, js);
+      p.log.success(`Updated ${jsEntry} with live-quiz plugin`);
+
     } else {
-      p.log.warn(`Could not find Reveal.initialize() in ${htmlFile} — add plugin config manually.`);
+      // Standalone HTML — extract inline script to main.js + set up Vite
+
+      const htmlPath = join(dir, htmlFile);
+      let html = readFileSync(htmlPath, "utf-8");
+
+      const scriptRe = /<script(?![^>]*\bsrc\b)[^>]*>([\s\S]*?)<\/script>/g;
+      let scriptMatch;
+      let revealScript = null;
+      while ((scriptMatch = scriptRe.exec(html)) !== null) {
+        if (REVEAL_INIT_RE.test(scriptMatch[1])) {
+          revealScript = scriptMatch;
+          break;
+        }
+      }
+
+      if (revealScript) {
+        const body = revealScript[1];
+        const initMatch = body.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
+
+        if (initMatch) {
+          let depth = 1, start = initMatch.index + initMatch[0].length, idx = start;
+          while (idx < body.length && depth > 0) {
+            if (body[idx] === "{") depth++;
+            else if (body[idx] === "}") depth--;
+            idx++;
+          }
+          const configInner = body.slice(start, idx - 1).trim();
+
+          const mainJs = [
+            'import Reveal from "reveal.js";',
+            'import "reveal.js/dist/reveal.css";',
+            'import RevealLiveQuiz from "live-quiz";',
+            'import "live-quiz/style.css";',
+            "",
+            "Reveal.initialize({",
+            liveQuizConfig,
+            `    ${configInner}`,
+            "});",
+            "",
+          ].join("\n");
+
+          writeFileSync(join(dir, "main.js"), mainJs);
+          p.log.success("Created main.js with live-quiz plugin");
+
+          // Remove CDN-loaded reveal.js assets
+          html = html.replace(/\s*<link[^>]*href="https?:\/\/[^"]*reveal[^"]*"[^>]*>/g, "");
+          html = html.replace(/\s*<script[^>]*src="https?:\/\/[^"]*reveal[^"]*"[^>]*>\s*<\/script>/g, "");
+
+          // Replace inline script with module entry
+          html = html.replace(revealScript[0], '<script type="module" src="/main.js"></script>');
+
+          writeFileSync(htmlPath, html);
+          p.log.success(`Updated ${htmlFile} — switched to module imports`);
+        }
+      } else {
+        p.log.warn(`Could not find Reveal.initialize() in ${htmlFile} — add plugin config manually.`);
+      }
+
+      // Set up Vite if not already present
+      if (!viteConfig) {
+        s.start("Installing vite...");
+        try {
+          execSync("npm install -D vite", { cwd: dir, stdio: "pipe" });
+          s.stop("Vite installed!");
+        } catch {
+          s.stop("Could not install vite — run `npm install -D vite` manually.");
+        }
+
+        writeFileSync(
+          join(dir, "vite.config.js"),
+          [
+            'import { resolve } from "path";',
+            "",
+            "export default {",
+            "  build: {",
+            "    rollupOptions: {",
+            "      input: {",
+            `        main: resolve(import.meta.dirname, "${htmlFile}"),`,
+            '        quiz: resolve(import.meta.dirname, "quiz.html"),',
+            "      },",
+            "    },",
+            "  },",
+            "};",
+            "",
+          ].join("\n"),
+        );
+        p.log.success("Created vite.config.js");
+
+        pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+        pkg.scripts = pkg.scripts || {};
+        if (!pkg.scripts.dev) pkg.scripts.dev = "vite";
+        if (!pkg.scripts.build) pkg.scripts.build = "vite build";
+        if (!pkg.scripts.preview) pkg.scripts.preview = "vite preview";
+        writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+        p.log.success("Added dev/build/preview scripts to package.json");
+      }
     }
 
-    // Set up Vite if not already present
-    if (!viteConfig) {
-      s.start("Installing vite...");
-      try {
-        execSync("npm install -D vite", { cwd: dir, stdio: "pipe" });
-        s.stop("Vite installed!");
-      } catch {
-        s.stop("Could not install vite — run `npm install -D vite` manually.");
-      }
+    // Vite config snippet (only if user already had one)
+    if (viteConfig) {
+      p.note(
+        [
+          color.dim("// Add quiz.html as a second entry point:"),
+          color.cyan("build: {"),
+          color.cyan("  rollupOptions: {"),
+          color.cyan("    input: {"),
+          color.cyan(`      main: resolve(import.meta.dirname, "${htmlFile}"),`),
+          color.cyan('      quiz: resolve(import.meta.dirname, "quiz.html"),'),
+          color.cyan("    },"),
+          color.cyan("  },"),
+          color.cyan("},"),
+        ].join("\n"),
+        `Update ${viteConfig}`,
+      );
+    }
+
+  } else {
+    // Slidev — modify slides.md
+    const slidesPath = join(dir, "slides.md");
+
+    if (existsSync(slidesPath)) {
+      modifySlidesConfig(dir, urls.wsUrl, quizGroupId, isVercel);
+      p.log.success("Updated slides.md headmatter with quiz configuration");
+
+      appendFileSync(slidesPath, SLIDEV_QUIZ_SLIDES);
+      p.log.success("Added sample quiz slides to slides.md");
+    } else {
+      const frontmatter = [
+        "---",
+        "addons:",
+        "  - slidev-addon-live-quiz",
+        "liveQuiz:",
+        `  wsUrl: ${urls.wsUrl}`,
+        `  quizGroupId: ${quizGroupId}`,
+        "  quizUrl: /quiz.html",
+        isVercel ? "  endpoints:\n    answer: /api/quiz-answer\n    sync: /api/quiz-sync" : null,
+        "---",
+      ].filter(Boolean).join("\n");
 
       writeFileSync(
-        join(dir, "vite.config.js"),
-        [
-          'import { resolve } from "path";',
-          "",
-          "export default {",
-          "  build: {",
-          "    rollupOptions: {",
-          "      input: {",
-          `        main: resolve(import.meta.dirname, "${htmlFile}"),`,
-          '        quiz: resolve(import.meta.dirname, "quiz.html"),',
-          "      },",
-          "    },",
-          "  },",
-          "};",
-          "",
-        ].join("\n"),
+        slidesPath,
+        frontmatter + "\n\n# Welcome\n\nYour Slidev presentation\n" + SLIDEV_QUIZ_SLIDES,
       );
-      p.log.success("Created vite.config.js");
-
-      pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-      pkg.scripts = pkg.scripts || {};
-      if (!pkg.scripts.dev) pkg.scripts.dev = "vite";
-      if (!pkg.scripts.build) pkg.scripts.build = "vite build";
-      if (!pkg.scripts.preview) pkg.scripts.preview = "vite preview";
-      writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-      p.log.success("Added dev/build/preview scripts to package.json");
+      p.log.success("Created slides.md with quiz configuration");
     }
   }
 
-  // Step 8 — Vite config snippet (only if user already had one — they need to add quiz.html entry)
+  // Step 7 — Deploy guidance
 
-  if (viteConfig) {
-    p.note(
-      [
-        color.dim("// Add quiz.html as a second entry point:"),
-        color.cyan("build: {"),
-        color.cyan("  rollupOptions: {"),
-        color.cyan("    input: {"),
-        color.cyan(`      main: resolve(import.meta.dirname, "${htmlFile}"),`),
-        color.cyan('      quiz: resolve(import.meta.dirname, "quiz.html"),'),
-        color.cyan("    },"),
-        color.cyan("  },"),
-        color.cyan("},"),
-      ].join("\n"),
-      `Update ${viteConfig}`,
-    );
-  }
-
-  // Step 9 — Deploy guidance
+  const buildCmd = framework === "slidev" ? "npx slidev build" : "npm run build";
+  const devCmd = framework === "slidev" ? "npx slidev" : "npm run dev";
 
   let gitRemoteUrl = "";
   try {
@@ -686,13 +888,13 @@ createParticipantUI("#quiz-root", {
         if (deploy && !p.isCancel(deploy)) {
           s.start("Building and deploying...");
           try {
-            execSync("npm run build && netlify deploy --prod --dir=dist", {
+            execSync(`${buildCmd} && netlify deploy --prod --dir=dist`, {
               cwd: dir,
               stdio: "pipe",
             });
             s.stop("Deployed to Netlify!");
           } catch {
-            s.stop("Deploy failed — try `npm run build && netlify deploy --prod --dir=dist` manually.");
+            s.stop(`Deploy failed — try \`${buildCmd} && netlify deploy --prod --dir=dist\` manually.`);
           }
         }
       }
@@ -703,7 +905,7 @@ createParticipantUI("#quiz-root", {
           gitRemoteUrl
             ? `2. Connect your GitHub repo: ${color.cyan(repoName)}`
             : `2. Connect your GitHub repo`,
-          `3. Build command: ${color.cyan("npm run build")}`,
+          `3. Build command: ${color.cyan(buildCmd)}`,
           `4. Publish directory: ${color.cyan("dist")}`,
           `5. Add environment variable:`,
           `   ${color.cyan("ANYCABLE_BROADCAST_URL")} = ${urls.broadcastUrl}`,
@@ -758,33 +960,44 @@ createParticipantUI("#quiz-root", {
         }
       }
     } else {
+      const frameworkPreset = framework === "slidev" ? "Other" : "Vite";
       p.note(
         [
           `1. Click ${color.bold("Import Git Repository")}`,
           gitRemoteUrl
             ? `2. Select your repo: ${color.cyan(repoName)}`
             : `2. Select your repo`,
-          `3. Framework preset: ${color.cyan("Vite")}`,
+          `3. Framework preset: ${color.cyan(frameworkPreset)}`,
+          framework === "slidev" ? `   Build command: ${color.cyan(buildCmd)}` : null,
+          framework === "slidev" ? `   Output directory: ${color.cyan("dist")}` : null,
           `4. Add environment variable:`,
           `   ${color.cyan("ANYCABLE_BROADCAST_URL")} = ${urls.broadcastUrl}`,
           `5. Click Deploy!`,
           "",
           `Or install the CLI: ${color.cyan("npm i -g vercel")}`,
-        ].join("\n"),
+        ].filter(Boolean).join("\n"),
         "Deploy to Vercel",
       );
     }
   }
 
-  // Step 10 — Done
+  // Step 8 — Done
 
-  const nextSteps = [
-    viteConfig ? `1. Update ${color.bold(viteConfig)} to add quiz.html entry point (see above)` : null,
-    `${viteConfig ? "2" : "1"}. Run ${color.bold("npm run dev")} and try your quiz!`,
-    `${viteConfig ? "3" : "2"}. Commit and push to deploy`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  let nextSteps;
+  if (framework === "revealjs") {
+    nextSteps = [
+      viteConfig ? `1. Update ${color.bold(viteConfig)} to add quiz.html entry point (see above)` : null,
+      `${viteConfig ? "2" : "1"}. Run ${color.bold(devCmd)} and try your quiz!`,
+      `${viteConfig ? "3" : "2"}. Commit and push to deploy`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  } else {
+    nextSteps = [
+      `1. Run ${color.bold(devCmd)} and try your quiz!`,
+      `2. Commit and push to deploy`,
+    ].join("\n");
+  }
 
   p.note(nextSteps, "Next steps");
 

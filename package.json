@@ -1,12 +1,11 @@
 {
   "name": "create-live-quiz",
   "version": "0.1.0",
-  "description": "Scaffold a Reveal.js presentation with live audience quizzes",
+  "description": "Scaffold a Reveal.js or Slidev presentation with live audience quizzes",
   "type": "module",
   "bin": "index.mjs",
   "files": [
-    "index.mjs",
-    "functions"
+    "index.mjs"
   ],
   "repository": {
     "type": "git",
@@ -21,6 +20,7 @@
     "create",
     "scaffolder",
     "reveal.js",
+    "slidev",
     "quiz",
     "live-quiz",
     "anycable"
