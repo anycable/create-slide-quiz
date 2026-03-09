@@ -5,8 +5,12 @@
   "type": "module",
   "bin": "index.mjs",
   "files": [
-    "index.mjs"
+    "index.mjs",
+    "lib.mjs"
   ],
+  "scripts": {
+    "test": "vitest run"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/anycable/create-live-quiz"
@@ -24,5 +28,8 @@
     "quiz",
     "live-quiz",
     "anycable"
-  ]
+  ],
+  "devDependencies": {
+    "vitest": "^4.0.18"
+  }
 }
