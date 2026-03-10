@@ -99,6 +99,8 @@ function insertQuizSlides(dir, htmlFile) {
   const filePath = join(dir, htmlFile);
   const content = readFileSync(filePath, "utf-8");
 
+  if (content.includes("data-quiz-id")) return "exists";
+
   const slidesMatch = content.match(/class\s*=\s*"[^"]*\bslides\b[^"]*"/);
   if (!slidesMatch) return false;
 
@@ -633,7 +635,9 @@ createParticipantUI("#quiz-root", {
   if (framework === "revealjs") {
     // Auto-modify HTML
     const inserted = insertQuizSlides(dir, htmlFile);
-    if (inserted) {
+    if (inserted === "exists") {
+      p.log.info(`Quiz slides already present in ${htmlFile} — skipped.`);
+    } else if (inserted) {
       p.log.success(`Added sample quiz slides to ${htmlFile}`);
     } else {
       p.log.warn(`Could not auto-insert quiz slides into ${htmlFile} — add them manually.`);
@@ -655,34 +659,38 @@ createParticipantUI("#quiz-root", {
       const jsPath = join(dir, jsEntry);
       let js = readFileSync(jsPath, "utf-8");
 
-      const importLines = 'import RevealSlideQuiz from "slide-quiz";\nimport "slide-quiz/style.css";';
-      const firstImport = js.match(/^import\s/m);
-      if (firstImport) {
-        js = js.slice(0, firstImport.index) + importLines + "\n" + js.slice(firstImport.index);
+      if (js.includes("slide-quiz")) {
+        p.log.info(`${jsEntry} already has slide-quiz configured — skipped.`);
       } else {
-        js = importLines + "\n\n" + js;
-      }
-
-      const pluginsMatch = js.match(/plugins\s*:\s*\[/);
-      if (pluginsMatch) {
-        const pos = pluginsMatch.index + pluginsMatch[0].length;
-        js = js.slice(0, pos) + "RevealSlideQuiz, " + js.slice(pos);
-        const initMatch = js.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
-        if (initMatch) {
-          const pos2 = initMatch.index + initMatch[0].length;
-          const sqOnly = slideQuizConfig.split("\n").filter(l => !l.includes("plugins")).join("\n");
-          js = js.slice(0, pos2) + "\n" + sqOnly + "\n" + js.slice(pos2);
+        const importLines = 'import RevealSlideQuiz from "slide-quiz";\nimport "slide-quiz/style.css";';
+        const firstImport = js.match(/^import\s/m);
+        if (firstImport) {
+          js = js.slice(0, firstImport.index) + importLines + "\n" + js.slice(firstImport.index);
+        } else {
+          js = importLines + "\n\n" + js;
         }
-      } else {
-        const initMatch = js.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
-        if (initMatch) {
-          const pos = initMatch.index + initMatch[0].length;
-          js = js.slice(0, pos) + "\n" + slideQuizConfig + "\n" + js.slice(pos);
-        }
-      }
 
-      writeFileSync(jsPath, js);
-      p.log.success(`Updated ${jsEntry} with slide-quiz plugin`);
+        const pluginsMatch = js.match(/plugins\s*:\s*\[/);
+        if (pluginsMatch) {
+          const pos = pluginsMatch.index + pluginsMatch[0].length;
+          js = js.slice(0, pos) + "RevealSlideQuiz, " + js.slice(pos);
+          const initMatch = js.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
+          if (initMatch) {
+            const pos2 = initMatch.index + initMatch[0].length;
+            const sqOnly = slideQuizConfig.split("\n").filter(l => !l.includes("plugins")).join("\n");
+            js = js.slice(0, pos2) + "\n" + sqOnly + "\n" + js.slice(pos2);
+          }
+        } else {
+          const initMatch = js.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
+          if (initMatch) {
+            const pos = initMatch.index + initMatch[0].length;
+            js = js.slice(0, pos) + "\n" + slideQuizConfig + "\n" + js.slice(pos);
+          }
+        }
+
+        writeFileSync(jsPath, js);
+        p.log.success(`Updated ${jsEntry} with slide-quiz plugin`);
+      }
 
     } else {
       // Standalone HTML — extract inline script to main.js + set up Vite
@@ -809,8 +817,13 @@ createParticipantUI("#quiz-root", {
       modifySlidesConfig(dir, urls.wsUrl, quizGroupId, isVercel);
       p.log.success("Updated slides.md headmatter with quiz configuration");
 
-      appendFileSync(slidesPath, SLIDEV_QUIZ_SLIDES);
-      p.log.success("Added sample quiz slides to slides.md");
+      const slidesContent = readFileSync(slidesPath, "utf-8");
+      if (slidesContent.includes("layout: quiz")) {
+        p.log.info("Quiz slides already present in slides.md — skipped.");
+      } else {
+        appendFileSync(slidesPath, SLIDEV_QUIZ_SLIDES);
+        p.log.success("Added sample quiz slides to slides.md");
+      }
     } else {
       const frontmatter = [
         "---",
@@ -861,39 +874,55 @@ createParticipantUI("#quiz-root", {
 
       if (useNetlifyCli && !p.isCancel(useNetlifyCli)) {
         p.log.step("Running `netlify init`...");
+        let initOk = false;
         try {
           run("netlify init", dir);
+          initOk = true;
         } catch {
           p.log.warn("netlify init failed — you can run it later.");
         }
 
-        s.start("Setting environment variables...");
-        try {
-          execSync(`netlify env:set ANYCABLE_BROADCAST_URL "${urls.broadcastUrl}"`, {
-            cwd: dir,
-            stdio: "pipe",
-          });
-          s.stop("Environment variables set on Netlify!");
-        } catch {
-          s.stop("Could not set env vars — set them in the Netlify dashboard.");
-        }
-
-        const deploy = await p.confirm({
-          message: "Build and deploy to production?",
-          initialValue: true,
-        });
-
-        if (deploy && !p.isCancel(deploy)) {
-          s.start("Building and deploying...");
+        if (initOk) {
+          s.start("Setting environment variables...");
           try {
-            execSync(`${buildCmd} && netlify deploy --prod --dir=dist`, {
+            execSync(`netlify env:set ANYCABLE_BROADCAST_URL "${urls.broadcastUrl}"`, {
               cwd: dir,
               stdio: "pipe",
             });
-            s.stop("Deployed to Netlify!");
+            s.stop("Environment variables set on Netlify!");
           } catch {
-            s.stop(`Deploy failed — try \`${buildCmd} && netlify deploy --prod --dir=dist\` manually.`);
+            s.stop("Could not set env vars — set them in the Netlify dashboard.");
           }
+
+          const deploy = await p.confirm({
+            message: "Build and deploy to production?",
+            initialValue: true,
+          });
+
+          if (deploy && !p.isCancel(deploy)) {
+            s.start("Building and deploying...");
+            try {
+              execSync(`${buildCmd} && netlify deploy --prod --dir=dist`, {
+                cwd: dir,
+                stdio: "pipe",
+              });
+              s.stop("Deployed to Netlify!");
+            } catch {
+              s.stop(`Deploy failed — try \`${buildCmd} && netlify deploy --prod --dir=dist\` manually.`);
+            }
+          }
+        } else {
+          p.note(
+            [
+              `1. Run ${color.cyan("netlify init")} to link your project`,
+              `2. Re-run ${color.cyan("npx create-slide-quiz")} to finish setup`,
+              "",
+              `Or deploy manually:`,
+              `  ${color.cyan(`netlify env:set ANYCABLE_BROADCAST_URL "${urls.broadcastUrl}"`)}`,
+              `  ${color.cyan(`${buildCmd} && netlify deploy --prod --dir=dist`)}`,
+            ].join("\n"),
+            "When you're ready to deploy",
+          );
         }
       }
     } else {
@@ -925,36 +954,52 @@ createParticipantUI("#quiz-root", {
 
       if (useVercelCli && !p.isCancel(useVercelCli)) {
         p.log.step("Running `vercel link`...");
+        let linkOk = false;
         try {
           run("vercel link", dir);
+          linkOk = true;
         } catch {
           p.log.warn("vercel link failed — you can run it later.");
         }
 
-        s.start("Setting environment variables...");
-        try {
-          execSync(
-            `echo "${urls.broadcastUrl}" | vercel env add ANYCABLE_BROADCAST_URL production`,
-            { cwd: dir, stdio: "pipe" },
-          );
-          s.stop("Environment variables set on Vercel!");
-        } catch {
-          s.stop("Could not set env vars — set them in the Vercel dashboard.");
-        }
-
-        const deploy = await p.confirm({
-          message: "Deploy to production?",
-          initialValue: true,
-        });
-
-        if (deploy && !p.isCancel(deploy)) {
-          s.start("Deploying...");
+        if (linkOk) {
+          s.start("Setting environment variables...");
           try {
-            execSync("vercel --prod", { cwd: dir, stdio: "pipe" });
-            s.stop("Deployed to Vercel!");
+            execSync(
+              `echo "${urls.broadcastUrl}" | vercel env add ANYCABLE_BROADCAST_URL production`,
+              { cwd: dir, stdio: "pipe" },
+            );
+            s.stop("Environment variables set on Vercel!");
           } catch {
-            s.stop("Deploy failed — try `vercel --prod` manually.");
+            s.stop("Could not set env vars — set them in the Vercel dashboard.");
           }
+
+          const deploy = await p.confirm({
+            message: "Deploy to production?",
+            initialValue: true,
+          });
+
+          if (deploy && !p.isCancel(deploy)) {
+            s.start("Deploying...");
+            try {
+              execSync("vercel --prod", { cwd: dir, stdio: "pipe" });
+              s.stop("Deployed to Vercel!");
+            } catch {
+              s.stop("Deploy failed — try `vercel --prod` manually.");
+            }
+          }
+        } else {
+          p.note(
+            [
+              `1. Run ${color.cyan("vercel link")} to link your project`,
+              `2. Re-run ${color.cyan("npx create-slide-quiz")} to finish setup`,
+              "",
+              `Or deploy manually:`,
+              `  ${color.cyan(`echo "${urls.broadcastUrl}" | vercel env add ANYCABLE_BROADCAST_URL production`)}`,
+              `  ${color.cyan("vercel --prod")}`,
+            ].join("\n"),
+            "When you're ready to deploy",
+          );
         }
       }
     } else {
