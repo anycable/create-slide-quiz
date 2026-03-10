@@ -1,5 +1,5 @@
 {
-  "name": "create-live-quiz",
+  "name": "create-slide-quiz",
   "version": "0.1.1",
   "description": "Scaffold a Reveal.js or Slidev presentation with live audience quizzes",
   "type": "module",
@@ -13,7 +13,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/anycable/create-live-quiz"
+    "url": "https://github.com/anycable/create-slide-quiz"
   },
   "dependencies": {
     "@clack/prompts": "^0.9.1",
@@ -26,7 +26,7 @@
     "reveal.js",
     "slidev",
     "quiz",
-    "live-quiz",
+    "slide-quiz",
     "anycable"
   ],
   "devDependencies": {

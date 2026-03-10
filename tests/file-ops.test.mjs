@@ -35,14 +35,14 @@ describe("insertQuizSlides", () => {
 describe("modifySlidesConfig", () => {
   let dir;
 
-  it("adds addons + liveQuiz to existing frontmatter", async () => {
+  it("adds addons + slideQuiz to existing frontmatter", async () => {
     ({ dir, cleanup } = await createTestDir({ framework: "slidev" }));
     modifySlidesConfig(dir, "wss://test.anycable.io/cable", "my-quiz", false);
 
     const content = readFileSync(join(dir, "slides.md"), "utf-8");
     expect(content).toContain("addons:");
-    expect(content).toContain("slidev-addon-live-quiz");
-    expect(content).toContain("liveQuiz:");
+    expect(content).toContain("slidev-addon-slide-quiz");
+    expect(content).toContain("slideQuiz:");
     expect(content).toContain("wss://test.anycable.io/cable");
     expect(content).toContain("my-quiz");
     expect(content).toContain("quizUrl: /quiz.html");
@@ -57,8 +57,8 @@ describe("modifySlidesConfig", () => {
     // Should still have the original addons line, not duplicate
     const addonMatches = content.match(/addons:/g);
     expect(addonMatches).toHaveLength(1);
-    // But liveQuiz should be added
-    expect(content).toContain("liveQuiz:");
+    // But slideQuiz should be added
+    expect(content).toContain("slideQuiz:");
   });
 
   it("creates frontmatter when file has none", async () => {
@@ -69,7 +69,7 @@ describe("modifySlidesConfig", () => {
     const content = readFileSync(join(dir, "slides.md"), "utf-8");
     expect(content).toMatch(/^---\n/);
     expect(content).toContain("addons:");
-    expect(content).toContain("liveQuiz:");
+    expect(content).toContain("slideQuiz:");
     expect(content).toContain("# My Presentation");
   });
 

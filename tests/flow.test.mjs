@@ -97,12 +97,12 @@ describe("Slidev + Netlify flow", () => {
     expect(existsSync(join(dir, "netlify", "functions", "quiz-sync.mjs"))).toBe(true);
   });
 
-  it("modifies slides.md headmatter (addons + liveQuiz)", async () => {
+  it("modifies slides.md headmatter (addons + slideQuiz)", async () => {
     await main();
     const content = readFileSync(join(dir, "slides.md"), "utf-8");
     expect(content).toContain("addons:");
-    expect(content).toContain("slidev-addon-live-quiz");
-    expect(content).toContain("liveQuiz:");
+    expect(content).toContain("slidev-addon-slide-quiz");
+    expect(content).toContain("slideQuiz:");
     expect(content).toContain("wss://test.anycable.io/cable");
   });
 
@@ -215,8 +215,8 @@ describe("Slidev (no slides.md, user-selected)", () => {
 
     const content = readFileSync(join(dir, "slides.md"), "utf-8");
     expect(content).toContain("addons:");
-    expect(content).toContain("slidev-addon-live-quiz");
-    expect(content).toContain("liveQuiz:");
+    expect(content).toContain("slidev-addon-slide-quiz");
+    expect(content).toContain("slideQuiz:");
     expect(content).toContain("layout: quiz");
   });
 });

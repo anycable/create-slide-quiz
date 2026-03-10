@@ -1,13 +1,13 @@
-# create-live-quiz
+# create-slide-quiz
 
-[![npm version](https://img.shields.io/npm/v/create-live-quiz)](https://www.npmjs.com/package/create-live-quiz)
+[![npm version](https://img.shields.io/npm/v/create-slide-quiz)](https://www.npmjs.com/package/create-slide-quiz)
 
-Scaffold a [Reveal.js](https://revealjs.com) presentation with live audience quizzes, powered by [live-quiz](https://github.com/anycable/live-quiz) and [AnyCable](https://anycable.io).
+Scaffold a [Reveal.js](https://revealjs.com) presentation with live audience quizzes, powered by [slide-quiz](https://github.com/anycable/slide-quiz) and [AnyCable](https://anycable.io).
 
 ## Usage
 
 ```bash
-npx create-live-quiz
+npx create-slide-quiz
 ```
 
 The CLI will walk you through:

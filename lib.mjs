@@ -1,8 +1,8 @@
 /**
- * create-live-quiz — Add live audience quizzes to your presentation
+ * create-slide-quiz — Add live audience quizzes to your presentation
  *
  * Supports Reveal.js and Slidev frameworks.
- * Usage: cd your-presentation && npx create-live-quiz
+ * Usage: cd your-presentation && npx create-slide-quiz
  */
 
 import * as p from "@clack/prompts";
@@ -157,9 +157,9 @@ function modifySlidesConfig(dir, wsUrl, quizGroupId, isVercel) {
   const slidesPath = join(dir, "slides.md");
   let content = readFileSync(slidesPath, "utf-8");
 
-  const addonsYaml = "addons:\n  - slidev-addon-live-quiz";
-  const liveQuizYaml = [
-    "liveQuiz:",
+  const addonsYaml = "addons:\n  - slidev-addon-slide-quiz";
+  const slideQuizYaml = [
+    "slideQuiz:",
     `  wsUrl: ${wsUrl}`,
     `  quizGroupId: ${quizGroupId}`,
     "  quizUrl: /quiz.html",
@@ -172,13 +172,13 @@ function modifySlidesConfig(dir, wsUrl, quizGroupId, isVercel) {
       const frontmatter = content.slice(4, closingIdx);
       let additions = "";
       if (!frontmatter.includes("addons:")) additions += addonsYaml + "\n";
-      if (!frontmatter.includes("liveQuiz:")) additions += liveQuizYaml + "\n";
+      if (!frontmatter.includes("slideQuiz:")) additions += slideQuizYaml + "\n";
       if (additions) {
         content = content.slice(0, closingIdx) + "\n" + additions + content.slice(closingIdx);
       }
     }
   } else {
-    content = `---\n${addonsYaml}\n${liveQuizYaml}\n---\n\n${content}`;
+    content = `---\n${addonsYaml}\n${slideQuizYaml}\n---\n\n${content}`;
   }
 
   writeFileSync(slidesPath, content);
@@ -212,7 +212,7 @@ options:
 // —— Main ——
 
 async function main() {
-  p.intro(color.bgCyan(color.black(" create-live-quiz ")));
+  p.intro(color.bgCyan(color.black(" create-slide-quiz ")));
 
   const dir = process.cwd();
 
@@ -463,8 +463,8 @@ async function main() {
     p.note(reviewLines.join("\n"), "Review your settings");
 
     const confirmLabel = framework === "revealjs"
-      ? "Yes, install live-quiz"
-      : "Yes, install slidev-addon-live-quiz";
+      ? "Yes, install slide-quiz"
+      : "Yes, install slidev-addon-slide-quiz";
 
     const reviewAction = await p.select({
       message: "Look good?",
@@ -499,12 +499,12 @@ async function main() {
     : "";
 
   if (framework === "revealjs") {
-    s.start("Installing live-quiz...");
+    s.start("Installing slide-quiz...");
     try {
-      execSync("npm install live-quiz @anycable/serverless-js", { cwd: dir, stdio: "pipe" });
-      s.stop("live-quiz installed!");
+      execSync("npm install slide-quiz @anycable/serverless-js", { cwd: dir, stdio: "pipe" });
+      s.stop("slide-quiz installed!");
     } catch {
-      s.stop("npm install failed — run `npm install live-quiz @anycable/serverless-js` manually.");
+      s.stop("npm install failed — run `npm install slide-quiz @anycable/serverless-js` manually.");
     }
 
     if (!existsSync(join(dir, "quiz.html"))) {
@@ -536,8 +536,8 @@ async function main() {
     if (!existsSync(join(dir, "quiz.js"))) {
       writeFileSync(
         join(dir, "quiz.js"),
-        `import { createParticipantUI } from "live-quiz/participant";
-import "live-quiz/participant.css";
+        `import { createParticipantUI } from "slide-quiz/participant";
+import "slide-quiz/participant.css";
 
 createParticipantUI("#quiz-root", {
   wsUrl: "${urls.wsUrl}",
@@ -551,17 +551,17 @@ createParticipantUI("#quiz-root", {
     }
   } else {
     // Slidev
-    s.start("Installing slidev-addon-live-quiz...");
+    s.start("Installing slidev-addon-slide-quiz...");
     try {
-      execSync("npm install slidev-addon-live-quiz @anycable/serverless-js", { cwd: dir, stdio: "pipe" });
-      s.stop("slidev-addon-live-quiz installed!");
+      execSync("npm install slidev-addon-slide-quiz @anycable/serverless-js", { cwd: dir, stdio: "pipe" });
+      s.stop("slidev-addon-slide-quiz installed!");
     } catch {
-      s.stop("npm install failed — run `npm install slidev-addon-live-quiz @anycable/serverless-js` manually.");
+      s.stop("npm install failed — run `npm install slidev-addon-slide-quiz @anycable/serverless-js` manually.");
     }
 
     // Copy quiz.html to public/
     mkdirSync(join(dir, "public"), { recursive: true });
-    const addonPublicDir = join(dir, "node_modules", "slidev-addon-live-quiz", "public");
+    const addonPublicDir = join(dir, "node_modules", "slidev-addon-slide-quiz", "public");
 
     if (!existsSync(join(dir, "public", "quiz.html"))) {
       copyFileSync(join(addonPublicDir, "quiz.html"), join(dir, "public", "quiz.html"));
@@ -577,8 +577,8 @@ createParticipantUI("#quiz-root", {
     }
   }
 
-  // Copy serverless functions (shared source from live-quiz)
-  const functionsSource = join(dir, "node_modules", "live-quiz", "functions");
+  // Copy serverless functions (shared source from slide-quiz)
+  const functionsSource = join(dir, "node_modules", "slide-quiz", "functions");
 
   if (platform === "netlify") {
     const fnDir = join(dir, "netlify", "functions");
@@ -640,9 +640,9 @@ createParticipantUI("#quiz-root", {
     }
 
     // Auto-inject plugin
-    const liveQuizConfig = [
-      `    plugins: [RevealLiveQuiz],`,
-      `    liveQuiz: {`,
+    const slideQuizConfig = [
+      `    plugins: [RevealSlideQuiz],`,
+      `    slideQuiz: {`,
       `      wsUrl: "${urls.wsUrl}",`,
       `      quizGroupId: "${quizGroupId}",`,
       "      quizUrl: `${window.location.origin}/quiz.html`,",
@@ -655,7 +655,7 @@ createParticipantUI("#quiz-root", {
       const jsPath = join(dir, jsEntry);
       let js = readFileSync(jsPath, "utf-8");
 
-      const importLines = 'import RevealLiveQuiz from "live-quiz";\nimport "live-quiz/style.css";';
+      const importLines = 'import RevealSlideQuiz from "slide-quiz";\nimport "slide-quiz/style.css";';
       const firstImport = js.match(/^import\s/m);
       if (firstImport) {
         js = js.slice(0, firstImport.index) + importLines + "\n" + js.slice(firstImport.index);
@@ -666,23 +666,23 @@ createParticipantUI("#quiz-root", {
       const pluginsMatch = js.match(/plugins\s*:\s*\[/);
       if (pluginsMatch) {
         const pos = pluginsMatch.index + pluginsMatch[0].length;
-        js = js.slice(0, pos) + "RevealLiveQuiz, " + js.slice(pos);
+        js = js.slice(0, pos) + "RevealSlideQuiz, " + js.slice(pos);
         const initMatch = js.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
         if (initMatch) {
           const pos2 = initMatch.index + initMatch[0].length;
-          const lqOnly = liveQuizConfig.split("\n").filter(l => !l.includes("plugins")).join("\n");
-          js = js.slice(0, pos2) + "\n" + lqOnly + "\n" + js.slice(pos2);
+          const sqOnly = slideQuizConfig.split("\n").filter(l => !l.includes("plugins")).join("\n");
+          js = js.slice(0, pos2) + "\n" + sqOnly + "\n" + js.slice(pos2);
         }
       } else {
         const initMatch = js.match(/Reveal\.(initialize|configure)\s*\(\s*\{/);
         if (initMatch) {
           const pos = initMatch.index + initMatch[0].length;
-          js = js.slice(0, pos) + "\n" + liveQuizConfig + "\n" + js.slice(pos);
+          js = js.slice(0, pos) + "\n" + slideQuizConfig + "\n" + js.slice(pos);
         }
       }
 
       writeFileSync(jsPath, js);
-      p.log.success(`Updated ${jsEntry} with live-quiz plugin`);
+      p.log.success(`Updated ${jsEntry} with slide-quiz plugin`);
 
     } else {
       // Standalone HTML — extract inline script to main.js + set up Vite
@@ -716,18 +716,18 @@ createParticipantUI("#quiz-root", {
           const mainJs = [
             'import Reveal from "reveal.js";',
             'import "reveal.js/dist/reveal.css";',
-            'import RevealLiveQuiz from "live-quiz";',
-            'import "live-quiz/style.css";',
+            'import RevealSlideQuiz from "slide-quiz";',
+            'import "slide-quiz/style.css";',
             "",
             "Reveal.initialize({",
-            liveQuizConfig,
+            slideQuizConfig,
             `    ${configInner}`,
             "});",
             "",
           ].join("\n");
 
           writeFileSync(join(dir, "main.js"), mainJs);
-          p.log.success("Created main.js with live-quiz plugin");
+          p.log.success("Created main.js with slide-quiz plugin");
 
           // Remove CDN-loaded reveal.js assets
           html = html.replace(/\s*<link[^>]*href="https?:\/\/[^"]*reveal[^"]*"[^>]*>/g, "");
@@ -815,8 +815,8 @@ createParticipantUI("#quiz-root", {
       const frontmatter = [
         "---",
         "addons:",
-        "  - slidev-addon-live-quiz",
-        "liveQuiz:",
+        "  - slidev-addon-slide-quiz",
+        "slideQuiz:",
         `  wsUrl: ${urls.wsUrl}`,
         `  quizGroupId: ${quizGroupId}`,
         "  quizUrl: /quiz.html",

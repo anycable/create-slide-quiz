@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
  */
 export async function createTestDir(options = {}) {
   const { framework = "empty", platform = null } = options;
-  const dir = await mkdtemp(join(tmpdir(), "create-live-quiz-test-"));
+  const dir = await mkdtemp(join(tmpdir(), "create-slide-quiz-test-"));
 
   if (framework === "revealjs") {
     writeFileSync(
@@ -81,8 +81,8 @@ Hello world
   }
 
   // Mock node_modules with stub files for both packages
-  const lqFunctionsNetlify = join(dir, "node_modules", "live-quiz", "functions", "netlify");
-  const lqFunctionsVercel = join(dir, "node_modules", "live-quiz", "functions", "vercel");
+  const lqFunctionsNetlify = join(dir, "node_modules", "slide-quiz", "functions", "netlify");
+  const lqFunctionsVercel = join(dir, "node_modules", "slide-quiz", "functions", "vercel");
   mkdirSync(lqFunctionsNetlify, { recursive: true });
   mkdirSync(lqFunctionsVercel, { recursive: true });
   writeFileSync(join(lqFunctionsNetlify, "quiz-answer.mjs"), "// stub");
@@ -90,7 +90,7 @@ Hello world
   writeFileSync(join(lqFunctionsVercel, "quiz-answer.mjs"), "// stub");
   writeFileSync(join(lqFunctionsVercel, "quiz-sync.mjs"), "// stub");
 
-  const addonPublic = join(dir, "node_modules", "slidev-addon-live-quiz", "public");
+  const addonPublic = join(dir, "node_modules", "slidev-addon-slide-quiz", "public");
   mkdirSync(addonPublic, { recursive: true });
   writeFileSync(join(addonPublic, "quiz.html"), "<!doctype html><html><body>quiz</body></html>");
   writeFileSync(join(addonPublic, "_redirects"), "/api/* /.netlify/functions/:splat 200");
