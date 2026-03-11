@@ -873,13 +873,13 @@ createParticipantUI("#quiz-root", {
       });
 
       if (useNetlifyCli && !p.isCancel(useNetlifyCli)) {
-        p.log.step("Running `netlify init`...");
+        p.log.step("Creating Netlify site...");
         let initOk = false;
         try {
-          run("netlify init", dir);
+          run("netlify sites:create --manual", dir);
           initOk = true;
         } catch {
-          p.log.warn("netlify init failed — you can run it later.");
+          p.log.warn("Site creation failed — you can run `netlify sites:create` later.");
         }
 
         if (initOk) {
@@ -914,7 +914,7 @@ createParticipantUI("#quiz-root", {
         } else {
           p.note(
             [
-              `1. Run ${color.cyan("netlify init")} to link your project`,
+              `1. Run ${color.cyan("netlify sites:create --manual")} to create a site`,
               `2. Re-run ${color.cyan("npx create-slide-quiz")} to finish setup`,
               "",
               `Or deploy manually:`,
