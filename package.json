@@ -1,6 +1,6 @@
 {
   "name": "create-slide-quiz",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Scaffold a Reveal.js or Slidev presentation with live audience quizzes",
   "type": "module",
   "bin": "index.mjs",
