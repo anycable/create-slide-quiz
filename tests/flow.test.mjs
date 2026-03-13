@@ -109,7 +109,6 @@ describe("Slidev + Netlify flow", () => {
   it("appends sample quiz slides to slides.md", async () => {
     await main();
     const content = readFileSync(join(dir, "slides.md"), "utf-8");
-    expect(content).toContain("layout: quiz");
     expect(content).toContain("layout: quiz-results");
   });
 
@@ -180,7 +179,7 @@ describe("Reveal.js + Netlify flow", () => {
   it("inserts quiz slides into HTML", async () => {
     await main();
     const content = readFileSync(join(dir, "index.html"), "utf-8");
-    expect(content).toContain('data-quiz-id="q1"');
+    expect(content).toContain('data-quiz-results="q1"');
   });
 
   it("creates .env", async () => {
@@ -217,6 +216,6 @@ describe("Slidev (no slides.md, user-selected)", () => {
     expect(content).toContain("addons:");
     expect(content).toContain("slidev-addon-slide-quiz");
     expect(content).toContain("slideQuiz:");
-    expect(content).toContain("layout: quiz");
+    expect(content).toContain("layout: quiz-results");
   });
 });

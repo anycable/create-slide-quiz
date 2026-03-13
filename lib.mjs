@@ -126,23 +126,12 @@ function insertQuizSlides(dir, htmlFile) {
   if (i >= content.length) return false;
 
   const quizHtml = `
-        <!-- Quiz question — shows options and QR code -->
-        <section data-quiz-id="q1"
-                 data-quiz-question="What's your favorite color?"
-                 data-quiz-options='[
-                   {"label":"A","text":"Red"},
-                   {"label":"B","text":"Blue","correct":true},
-                   {"label":"C","text":"Green"},
-                   {"label":"D","text":"Yellow"}
-                 ]'>
-        </section>
-
-        <!-- Live results — can be used without the question slide above -->
+        <!-- Live quiz — audience sees responses in real time -->
         <section data-quiz-results="q1"
                  data-quiz-question="What's your favorite color?"
                  data-quiz-options='[
                    {"label":"A","text":"Red"},
-                   {"label":"B","text":"Blue","correct":true},
+                   {"label":"B","text":"Blue"},
                    {"label":"C","text":"Green"},
                    {"label":"D","text":"Yellow"}
                  ]'>
@@ -197,26 +186,13 @@ function modifySlidesConfig(dir, wsUrl, quizGroupId, isVercel) {
 
 const SLIDEV_QUIZ_SLIDES = `
 ---
-# Quiz question — shows options and QR code
-layout: quiz
-quizId: q1
-question: What's your favorite color?
-titleText: Pop quiz!
-options:
-  - { label: A, text: Red }
-  - { label: B, text: Blue, correct: true }
-  - { label: C, text: Green }
-  - { label: D, text: Yellow }
----
-
----
-# Live results — can be used without the question slide above
+# Live quiz — audience sees responses in real time
 layout: quiz-results
 quizId: q1
 question: What's your favorite color?
 options:
   - { label: A, text: Red }
-  - { label: B, text: Blue, correct: true }
+  - { label: B, text: Blue }
   - { label: C, text: Green }
   - { label: D, text: Yellow }
 ---

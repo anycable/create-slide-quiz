@@ -16,10 +16,9 @@ describe("insertQuizSlides", () => {
     expect(result).toBe(true);
 
     const html = readFileSync(join(dir, "index.html"), "utf-8");
-    expect(html).toContain('data-quiz-id="q1"');
     expect(html).toContain('data-quiz-results="q1"');
     // Quiz slides should appear before the closing </div> of .slides
-    const quizIdx = html.indexOf("data-quiz-id");
+    const quizIdx = html.indexOf("data-quiz-results");
     const closingSlidesIdx = html.indexOf("</div>", quizIdx);
     expect(closingSlidesIdx).toBeGreaterThan(quizIdx);
   });
