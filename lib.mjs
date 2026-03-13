@@ -873,13 +873,19 @@ createParticipantUI("#quiz-root", {
       });
 
       if (useNetlifyCli && !p.isCancel(useNetlifyCli)) {
-        p.log.step("Creating Netlify site...");
-        let initOk = false;
-        try {
-          run("netlify sites:create --manual", dir);
-          initOk = true;
-        } catch {
-          p.log.warn("Site creation failed — you can run `netlify sites:create` later.");
+        const alreadyLinked = existsSync(join(dir, ".netlify", "state.json"));
+        let initOk = alreadyLinked;
+
+        if (alreadyLinked) {
+          p.log.info("Netlify site already linked — skipping site creation.");
+        } else {
+          p.log.step("Creating Netlify site...");
+          try {
+            run("netlify sites:create --manual", dir);
+            initOk = true;
+          } catch {
+            p.log.warn("Site creation failed — you can run `netlify sites:create` later.");
+          }
         }
 
         if (initOk) {
