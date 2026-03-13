@@ -630,6 +630,16 @@ createParticipantUI("#quiz-root", {
   ensureGitignore(dir, ".vite");
   ensureGitignore(dir, ".env");
 
+  // Initialize git if not already a repo
+  if (!existsSync(join(dir, ".git"))) {
+    try {
+      execSync("git init", { cwd: dir, stdio: "pipe" });
+      p.log.success("Initialized git repository");
+    } catch {
+      // git not installed — not critical
+    }
+  }
+
   // Step 6 — Framework-specific modifications
 
   if (framework === "revealjs") {
