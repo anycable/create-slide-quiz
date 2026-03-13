@@ -1,8 +1,4 @@
 #!/usr/bin/env node
-import { main } from "./lib.mjs";
-import * as p from "@clack/prompts";
+import { safeMain } from "./lib.mjs";
 
-main().catch(err => {
-  p.log.error(err.message);
-  process.exit(1);
-});
+safeMain();

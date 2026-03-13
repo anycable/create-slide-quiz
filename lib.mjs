@@ -25,20 +25,28 @@ function openUrl(url) {
     platform === "darwin" ? "open" :
     platform === "win32" ? "start" :
     "xdg-open";
-  exec(`${cmd} ${url}`);
+  try {
+    exec(`${cmd} ${url}`);
+  } catch {
+    // Headless / SSH — user will see the URL in the log message
+  }
 }
 
 function hasCommand(name) {
   try {
-    execSync(`which ${name}`, { stdio: "ignore" });
+    const check = platform === "win32" ? `where ${name}` : `which ${name}`;
+    execSync(check, { stdio: "ignore" });
     return true;
   } catch {
     return false;
   }
 }
 
-function run(cmd, cwd) {
-  execSync(cmd, { cwd, stdio: "inherit" });
+const CMD_TIMEOUT = 120_000; // 2 minutes for most commands
+const DEPLOY_TIMEOUT = 300_000; // 5 minutes for build + deploy
+
+function run(cmd, cwd, timeout = CMD_TIMEOUT) {
+  execSync(cmd, { cwd, stdio: "inherit", timeout });
 }
 
 // —— Detection ——
@@ -253,11 +261,16 @@ async function main() {
 
       if (!existsSync(pkgPath)) {
         p.log.info("No package.json found — initializing project...");
-        execSync("npm init -y", { cwd: dir, stdio: "pipe" });
+        try {
+          execSync("npm init -y", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
+        } catch {
+          s.stop(color.red("Could not initialize package.json."));
+          return p.cancel("Run `npm init -y` manually, then re-run create-slide-quiz.");
+        }
       }
 
       p.log.info("Installing reveal.js...");
-      execSync("npm install reveal.js", { cwd: dir, stdio: "pipe" });
+      execSync("npm install reveal.js", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
       pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
       p.log.success("Project initialized with reveal.js");
     }
@@ -295,7 +308,12 @@ async function main() {
 
     if (!existsSync(pkgPath)) {
       p.log.info("No package.json found — initializing project...");
-      execSync("npm init -y", { cwd: dir, stdio: "pipe" });
+      try {
+        execSync("npm init -y", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
+      } catch {
+        s.stop(color.red("Could not initialize package.json."));
+        return p.cancel("Run `npm init -y` manually, then re-run create-slide-quiz.");
+      }
       pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
     }
 
@@ -336,7 +354,11 @@ async function main() {
       }
     } else {
       p.log.info("No package.json found — initializing project...");
-      execSync("npm init -y", { cwd: dir, stdio: "pipe" });
+      try {
+        execSync("npm init -y", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
+      } catch {
+        return p.cancel("Could not initialize package.json. Run `npm init -y` manually, then re-run create-slide-quiz.");
+      }
       pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
     }
 
@@ -371,11 +393,12 @@ async function main() {
     openUrl("https://plus.anycable.io");
     p.log.info(`Opened ${color.underline("plus.anycable.io")} — sign in with GitHub`);
 
-    await p.confirm({
+    const signedIn = await p.confirm({
       message: "Signed in? Let's continue.",
       active: "Continue",
       inactive: "Waiting...",
     });
+    if (p.isCancel(signedIn)) return p.cancel("Cancelled.");
 
     p.note(
       [
@@ -387,11 +410,12 @@ async function main() {
       "Create a new cable",
     );
 
-    await p.confirm({
+    const created = await p.confirm({
       message: "Created? Next step.",
       active: "Continue",
       inactive: "Waiting...",
     });
+    if (p.isCancel(created)) return p.cancel("Cancelled.");
 
     p.note(
       [
@@ -404,11 +428,12 @@ async function main() {
       "Enable public streams",
     );
 
-    await p.confirm({
+    const deployed = await p.confirm({
       message: "Cable deployed?",
       active: "Continue",
       inactive: "Waiting...",
     });
+    if (p.isCancel(deployed)) return p.cancel("Cancelled.");
 
     p.log.success("AnyCable app is ready!");
   }
@@ -502,11 +527,13 @@ async function main() {
 
   if (framework === "revealjs") {
     s.start("Installing slide-quiz...");
+    let npmInstallOk = false;
     try {
-      execSync("npm install slide-quiz @anycable/serverless-js", { cwd: dir, stdio: "pipe" });
+      execSync("npm install slide-quiz @anycable/serverless-js", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
       s.stop("slide-quiz installed!");
+      npmInstallOk = true;
     } catch {
-      s.stop("npm install failed — run `npm install slide-quiz @anycable/serverless-js` manually.");
+      s.stop(color.yellow("npm install failed — run `npm install slide-quiz @anycable/serverless-js` manually."));
     }
 
     if (!existsSync(join(dir, "quiz.html"))) {
@@ -554,35 +581,43 @@ createParticipantUI("#quiz-root", {
   } else {
     // Slidev
     s.start("Installing slidev-addon-slide-quiz...");
+    let npmInstallOk = false;
     try {
-      execSync("npm install slidev-addon-slide-quiz @anycable/serverless-js", { cwd: dir, stdio: "pipe" });
+      execSync("npm install slidev-addon-slide-quiz @anycable/serverless-js", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
       s.stop("slidev-addon-slide-quiz installed!");
+      npmInstallOk = true;
     } catch {
-      s.stop("npm install failed — run `npm install slidev-addon-slide-quiz @anycable/serverless-js` manually.");
+      s.stop(color.yellow("npm install failed — run `npm install slidev-addon-slide-quiz @anycable/serverless-js` manually."));
     }
 
     // Copy quiz.html to public/
     mkdirSync(join(dir, "public"), { recursive: true });
     const addonPublicDir = join(dir, "node_modules", "slidev-addon-slide-quiz", "public");
 
-    if (!existsSync(join(dir, "public", "quiz.html"))) {
-      copyFileSync(join(addonPublicDir, "quiz.html"), join(dir, "public", "quiz.html"));
-      p.log.success("Copied quiz.html to public/");
-    } else {
-      p.log.info("public/quiz.html already exists — skipped.");
-    }
+    if (npmInstallOk && existsSync(addonPublicDir)) {
+      if (!existsSync(join(dir, "public", "quiz.html"))) {
+        copyFileSync(join(addonPublicDir, "quiz.html"), join(dir, "public", "quiz.html"));
+        p.log.success("Copied quiz.html to public/");
+      } else {
+        p.log.info("public/quiz.html already exists — skipped.");
+      }
 
-    // Copy _redirects for Netlify
-    if (!isVercel && !existsSync(join(dir, "public", "_redirects"))) {
-      copyFileSync(join(addonPublicDir, "_redirects"), join(dir, "public", "_redirects"));
-      p.log.success("Copied _redirects to public/");
+      // Copy _redirects for Netlify
+      if (!isVercel && !existsSync(join(dir, "public", "_redirects"))) {
+        copyFileSync(join(addonPublicDir, "_redirects"), join(dir, "public", "_redirects"));
+        p.log.success("Copied _redirects to public/");
+      }
+    } else if (!npmInstallOk) {
+      p.log.warn("Skipping file copies — install the packages first, then re-run create-slide-quiz.");
     }
   }
 
   // Copy serverless functions (shared source from slide-quiz)
   const functionsSource = join(dir, "node_modules", "slide-quiz", "functions");
 
-  if (platform === "netlify") {
+  if (!existsSync(functionsSource)) {
+    p.log.warn("Could not find serverless function templates — install slide-quiz first, then re-run.");
+  } else if (platform === "netlify") {
     const fnDir = join(dir, "netlify", "functions");
     mkdirSync(fnDir, { recursive: true });
     for (const f of readdirSync(join(functionsSource, "netlify"))) {
@@ -633,7 +668,7 @@ createParticipantUI("#quiz-root", {
   // Initialize git if not already a repo
   if (!existsSync(join(dir, ".git"))) {
     try {
-      execSync("git init", { cwd: dir, stdio: "pipe" });
+      execSync("git init", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
       p.log.success("Initialized git repository");
     } catch {
       // git not installed — not critical
@@ -765,7 +800,7 @@ createParticipantUI("#quiz-root", {
       if (!viteConfig) {
         s.start("Installing vite...");
         try {
-          execSync("npm install -D vite", { cwd: dir, stdio: "pipe" });
+          execSync("npm install -D vite", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
           s.stop("Vite installed!");
         } catch {
           s.stop("Could not install vite — run `npm install -D vite` manually.");
@@ -862,7 +897,7 @@ createParticipantUI("#quiz-root", {
 
   let gitRemoteUrl = "";
   try {
-    gitRemoteUrl = execSync("git remote get-url origin", { cwd: dir, stdio: "pipe" })
+    gitRemoteUrl = execSync("git remote get-url origin", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT })
       .toString()
       .trim();
   } catch {
@@ -891,7 +926,7 @@ createParticipantUI("#quiz-root", {
         } else {
           p.log.step("Creating Netlify site...");
           try {
-            run("netlify sites:create --manual", dir);
+            run("netlify sites:create --manual", dir, DEPLOY_TIMEOUT);
             initOk = true;
           } catch {
             p.log.warn("Site creation failed — you can run `netlify sites:create` later.");
@@ -904,6 +939,7 @@ createParticipantUI("#quiz-root", {
             execSync(`netlify env:set ANYCABLE_BROADCAST_URL "${urls.broadcastUrl}"`, {
               cwd: dir,
               stdio: "pipe",
+              timeout: CMD_TIMEOUT,
             });
             s.stop("Environment variables set on Netlify!");
           } catch {
@@ -921,6 +957,7 @@ createParticipantUI("#quiz-root", {
               execSync(`${buildCmd} && netlify deploy --prod --dir=dist`, {
                 cwd: dir,
                 stdio: "pipe",
+                timeout: DEPLOY_TIMEOUT,
               });
               s.stop("Deployed to Netlify!");
             } catch {
@@ -972,7 +1009,7 @@ createParticipantUI("#quiz-root", {
         p.log.step("Running `vercel link`...");
         let linkOk = false;
         try {
-          run("vercel link", dir);
+          run("vercel link", dir, DEPLOY_TIMEOUT);
           linkOk = true;
         } catch {
           p.log.warn("vercel link failed — you can run it later.");
@@ -983,7 +1020,7 @@ createParticipantUI("#quiz-root", {
           try {
             execSync(
               `echo "${urls.broadcastUrl}" | vercel env add ANYCABLE_BROADCAST_URL production`,
-              { cwd: dir, stdio: "pipe" },
+              { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT },
             );
             s.stop("Environment variables set on Vercel!");
           } catch {
@@ -998,7 +1035,7 @@ createParticipantUI("#quiz-root", {
           if (deploy && !p.isCancel(deploy)) {
             s.start("Deploying...");
             try {
-              execSync("vercel --prod", { cwd: dir, stdio: "pipe" });
+              execSync("vercel --prod", { cwd: dir, stdio: "pipe", timeout: DEPLOY_TIMEOUT });
               s.stop("Deployed to Vercel!");
             } catch {
               s.stop("Deploy failed — try `vercel --prod` manually.");
@@ -1063,8 +1100,22 @@ createParticipantUI("#quiz-root", {
   p.outro(color.green("Happy quizzing! 🎯"));
 }
 
+async function safeMain() {
+  try {
+    await main();
+  } catch (err) {
+    if (err?.message?.includes("User force closed")) {
+      // Ctrl+C — exit silently
+      process.exit(0);
+    }
+    p.log.error(`Unexpected error: ${err?.message || err}`);
+    p.log.info("If this keeps happening, please open an issue at https://github.com/anycable/slide-quiz/issues");
+    process.exit(1);
+  }
+}
+
 export {
   detectFramework, findRevealHtml, findJsEntry, detectPlatform, detectVite,
   insertQuizSlides, modifySlidesConfig, ensureGitignore, SLIDEV_QUIZ_SLIDES,
-  main,
+  main, safeMain,
 };
