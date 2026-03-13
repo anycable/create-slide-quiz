@@ -126,7 +126,7 @@ function insertQuizSlides(dir, htmlFile) {
   if (i >= content.length) return false;
 
   const quizHtml = `
-        <!-- Sample quiz — edit or move these slides! -->
+        <!-- Quiz question — shows options and QR code -->
         <section data-quiz-id="q1"
                  data-quiz-question="What's your favorite color?"
                  data-quiz-options='[
@@ -137,6 +137,7 @@ function insertQuizSlides(dir, htmlFile) {
                  ]'>
         </section>
 
+        <!-- Live results — can be used without the question slide above -->
         <section data-quiz-results="q1"
                  data-quiz-question="What's your favorite color?"
                  data-quiz-options='[
@@ -196,6 +197,7 @@ function modifySlidesConfig(dir, wsUrl, quizGroupId, isVercel) {
 
 const SLIDEV_QUIZ_SLIDES = `
 ---
+# Quiz question — shows options and QR code
 layout: quiz
 quizId: q1
 question: What's your favorite color?
@@ -208,6 +210,7 @@ options:
 ---
 
 ---
+# Live results — can be used without the question slide above
 layout: quiz-results
 quizId: q1
 question: What's your favorite color?
