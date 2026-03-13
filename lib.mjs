@@ -894,6 +894,8 @@ createParticipantUI("#quiz-root", {
 
   const buildCmd = framework === "slidev" ? "npx slidev build" : "npm run build";
   const devCmd = framework === "slidev" ? "npx slidev" : "npm run dev";
+  let deployed = false;
+  let siteUrl = "";
 
   let gitRemoteUrl = "";
   try {
@@ -954,12 +956,21 @@ createParticipantUI("#quiz-root", {
           if (deploy && !p.isCancel(deploy)) {
             s.start("Building and deploying...");
             try {
-              execSync(`${buildCmd} && netlify deploy --prod --dir=dist`, {
+              const deployOutput = execSync(`${buildCmd} && netlify deploy --prod --dir=dist`, {
                 cwd: dir,
                 stdio: "pipe",
                 timeout: DEPLOY_TIMEOUT,
-              });
-              s.stop("Deployed to Netlify!");
+              }).toString();
+              deployed = true;
+              const urlMatch = deployOutput.match(/Website URL:\s*(https?:\/\/\S+)/);
+              if (urlMatch) siteUrl = urlMatch[1];
+              if (!siteUrl) {
+                try {
+                  const state = JSON.parse(readFileSync(join(dir, ".netlify", "state.json"), "utf-8"));
+                  if (state.name) siteUrl = `https://${state.name}.netlify.app`;
+                } catch { /* ignore */ }
+              }
+              s.stop(siteUrl ? `Deployed to ${color.cyan(siteUrl)}` : "Deployed to Netlify!");
             } catch {
               s.stop(`Deploy failed — try \`${buildCmd} && netlify deploy --prod --dir=dist\` manually.`);
             }
@@ -1035,8 +1046,11 @@ createParticipantUI("#quiz-root", {
           if (deploy && !p.isCancel(deploy)) {
             s.start("Deploying...");
             try {
-              execSync("vercel --prod", { cwd: dir, stdio: "pipe", timeout: DEPLOY_TIMEOUT });
-              s.stop("Deployed to Vercel!");
+              const vercelOutput = execSync("vercel --prod", { cwd: dir, stdio: "pipe", timeout: DEPLOY_TIMEOUT }).toString();
+              deployed = true;
+              const vercelUrlMatch = vercelOutput.match(/(https?:\/\/\S+\.vercel\.app)/);
+              if (vercelUrlMatch) siteUrl = vercelUrlMatch[1];
+              s.stop(siteUrl ? `Deployed to ${color.cyan(siteUrl)}` : "Deployed to Vercel!");
             } catch {
               s.stop("Deploy failed — try `vercel --prod` manually.");
             }
@@ -1079,23 +1093,22 @@ createParticipantUI("#quiz-root", {
 
   // Step 8 — Done
 
-  let nextSteps;
-  if (framework === "revealjs") {
-    nextSteps = [
-      viteConfig ? `1. Update ${color.bold(viteConfig)} to add quiz.html entry point (see above)` : null,
-      `${viteConfig ? "2" : "1"}. Run ${color.bold(devCmd)} and try your quiz!`,
-      `${viteConfig ? "3" : "2"}. Commit and push to deploy`,
-    ]
-      .filter(Boolean)
-      .join("\n");
+  const steps = [];
+  if (framework === "revealjs" && viteConfig) {
+    steps.push(`Update ${color.bold(viteConfig)} to add quiz.html entry point (see above)`);
+  }
+  if (deployed && siteUrl) {
+    steps.push(`Your presentation is live at ${color.bold(siteUrl)}`);
+    steps.push(`Run ${color.bold(devCmd)} to develop locally`);
+  } else if (deployed) {
+    steps.push(`Your presentation is live!`);
+    steps.push(`Run ${color.bold(devCmd)} to develop locally`);
   } else {
-    nextSteps = [
-      `1. Run ${color.bold(devCmd)} and try your quiz!`,
-      `2. Commit and push to deploy`,
-    ].join("\n");
+    steps.push(`Run ${color.bold(devCmd)} and try your quiz!`);
+    steps.push(`Commit and push to deploy`);
   }
 
-  p.note(nextSteps, "Next steps");
+  p.note(steps.map((s, i) => `${i + 1}. ${s}`).join("\n"), "Next steps");
 
   p.outro(color.green("Happy quizzing! 🎯"));
 }
