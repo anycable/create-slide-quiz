@@ -1093,10 +1093,12 @@ createParticipantUI("#quiz-root", {
 
   // Step 8 — Done
 
+  const editFile = framework === "slidev" ? "slides.md" : htmlFile;
   const steps = [];
   if (framework === "revealjs" && viteConfig) {
     steps.push(`Update ${color.bold(viteConfig)} to add quiz.html entry point (see above)`);
   }
+  steps.push(`Edit your quiz slides in ${color.bold(editFile)} — change questions, options, or add more!`);
   if (deployed && siteUrl) {
     steps.push(`Your presentation is live at ${color.bold(siteUrl)}`);
     steps.push(`Run ${color.bold(devCmd)} to develop locally`);
