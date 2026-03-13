@@ -10,7 +10,7 @@ Scaffold a [Reveal.js](https://revealjs.com) or [Slidev](https://sli.dev) presen
 npx create-slide-quiz
 ```
 
-Run this inside your existing presentation directory, or in an empty directory to start from scratch.
+Run this inside your existing Reveal.js or Slidev project directory.
 
 ## What it does
 
