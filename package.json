@@ -20,9 +20,9 @@
     "url": "git+https://github.com/anycable/create-slide-quiz.git"
   },
   "dependencies": {
+    "@anycable/core": "^1.1.0",
     "@clack/prompts": "^0.9.1",
-    "picocolors": "^1.1.1",
-    "@anycable/core": "^1.1.0"
+    "picocolors": "^1.1.1"
   },
   "license": "MIT",
   "keywords": [
@@ -35,7 +35,7 @@
     "anycable"
   ],
   "devDependencies": {
-    "vitest": "^4.0.18"
+    "vitest": "^5.0.0"
   },
   "engines": {
     "node": ">=18"

@@ -59,7 +59,7 @@ async function checkPage(o) {
     const res = await fetch(url);
     const body = await res.text();
     if (res.ok && /<html/i.test(body)) pass("audience page served", url);
-    else fail("audience page served", `${url} returned ${res.status}${/<html/i.test(body) ? "" : " and no HTML"}. For Slidev, the addon's page is at /theme/quiz.html unless it was copied into public/.`);
+    else fail("audience page served", `${url} returned ${res.status}${/<html/i.test(body) ? "" : " and no HTML"}. For Slidev, copy node_modules/slidev-addon-slide-quiz/public/quiz.html into the deck's public/ folder.`);
   } catch (e) {
     fail("audience page served", `${url}: ${e.message}`);
   }
