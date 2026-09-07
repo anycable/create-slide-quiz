@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### 0.3.0
+## 0.3.0, 2026-09-07
 
 #### Added
 - Flags for every prompt: `--platform`, `--framework`, `--ws-url`, `--broadcast-url`, `--no-deploy`, `--skills` / `--no-skills`, `--yes`, `--help`. With `--yes` and both URLs the CLI runs without input, for CI and for AI agents. `--yes` also skips the deploy step, so it never blocks on a prompt or pushes to production on its own.
