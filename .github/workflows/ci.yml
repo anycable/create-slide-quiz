@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: node index.mjs --help
+      - run: node scripts/verify-deploy.mjs --help
+      - name: Verify the public demo deploy (HTTP only)
+        continue-on-error: true # third-party hosting; a demo outage must not block PRs
+        run: node scripts/verify-deploy.mjs --site https://slide-quiz-demo.netlify.app --platform netlify
+
+  # Scaffold a real Slidev deck with the CLI, no deploy. Exercises npm install
+  # of the published packages and every file the CLI writes.
+  scaffold:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Create a bare Slidev deck
+        run: |
+          mkdir deck && cd deck
+          npm init -y >/dev/null
+          npm pkg set type=module
+          npm install --no-audit --no-fund @slidev/cli @slidev/theme-default
+          printf -- '---\ntheme: default\n---\n\n# CI deck\n' > slides.md
+      - name: Run create-slide-quiz non-interactively (Vercel layout)
+        working-directory: deck
+        run: |
+          node ../index.mjs --yes --platform vercel --no-deploy \
+            --ws-url wss://example.invalid/cable --broadcast-url https://example.invalid/_broadcast
+          test -f api/quiz-sync.ts && test -f api/quiz-answer.ts && test -f api/shared.ts
+          test ! -f api/package.json
+          test -f vercel.json && test -f public/quiz.html && test -f .env
+          grep -q 'answer: /api/quiz-answer' slides.md
+          grep -q 'slidev-addon-slide-quiz' slides.md
+      - name: Build the deck
+        working-directory: deck
+        run: npx slidev build
