@@ -90,10 +90,17 @@ Hello world
   writeFileSync(join(lqFunctionsVercel, "quiz-answer.mjs"), "// stub");
   writeFileSync(join(lqFunctionsVercel, "quiz-sync.mjs"), "// stub");
 
+  // The addon ships only quiz.html since slidev-addon-slide-quiz 0.4; the CLI writes _redirects itself.
   const addonPublic = join(dir, "node_modules", "slidev-addon-slide-quiz", "public");
   mkdirSync(addonPublic, { recursive: true });
   writeFileSync(join(addonPublic, "quiz.html"), "<!doctype html><html><body>quiz</body></html>");
-  writeFileSync(join(addonPublic, "_redirects"), "/api/* /.netlify/functions/:splat 200");
+
+  // Agent skills shipped inside slide-quiz
+  for (const name of ["slide-quiz-setup", "slide-quiz-debug"]) {
+    const skillDir = join(dir, "node_modules", "slide-quiz", "skills", name);
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), `---\nname: ${name}\n---\nstub`);
+  }
 
   const cleanup = () => rm(dir, { recursive: true, force: true });
   return { dir, cleanup };

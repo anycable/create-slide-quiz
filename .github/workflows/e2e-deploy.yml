@@ -1,0 +1,123 @@
+# Deploys a scaffolded Slidev deck for real and checks it end to end:
+# audience page, both serverless functions, and a broadcast round trip over
+# the AnyCable WebSocket. This is the test that catches "works on Netlify,
+# broken on Vercel" bugs that unit tests cannot see.
+#
+# Needs repository secrets. Each platform job skips itself when its secrets
+# are absent, so forks and PRs from outside stay green.
+#
+#   ANYCABLE_WS_URL          wss://<cable>/cable      (a cable in public mode)
+#   ANYCABLE_BROADCAST_URL   https://<cable>/_broadcast
+#   VERCEL_TOKEN             https://vercel.com/account/tokens
+#   NETLIFY_AUTH_TOKEN       https://app.netlify.com/user/applications#personal-access-tokens
+#   NETLIFY_SITE_ID          an existing throwaway site's API ID
+#
+# The Vercel job deploys to production of a project named slide-quiz-e2e,
+# because preview deployments sit behind Vercel Authentication by default.
+name: E2E deploy
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  push:
+    branches: [main]
+    paths: ["lib.mjs", "scripts/**", ".github/workflows/e2e-deploy.yml"]
+
+jobs:
+  vercel:
+    runs-on: ubuntu-latest
+    env:
+      HAS_SECRETS: ${{ secrets.VERCEL_TOKEN != '' && secrets.ANYCABLE_WS_URL != '' && secrets.ANYCABLE_BROADCAST_URL != '' }}
+    steps:
+      - if: env.HAS_SECRETS != 'true'
+        run: echo "::notice::Skipping Vercel e2e, secrets not configured"
+      - if: env.HAS_SECRETS == 'true'
+        uses: actions/checkout@v4
+      - if: env.HAS_SECRETS == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: env.HAS_SECRETS == 'true'
+        run: npm ci
+      - if: env.HAS_SECRETS == 'true'
+        name: Scaffold
+        run: |
+          mkdir deck && cd deck
+          npm init -y >/dev/null
+          npm pkg set name=slide-quiz-e2e type=module
+          npm install --no-audit --no-fund @slidev/cli @slidev/theme-default
+          printf -- '---\ntheme: default\n---\n\n# E2E deck\n' > slides.md
+          node ../index.mjs --yes --platform vercel --no-deploy \
+            --ws-url "$ANYCABLE_WS_URL" --broadcast-url "$ANYCABLE_BROADCAST_URL"
+        env:
+          ANYCABLE_WS_URL: ${{ secrets.ANYCABLE_WS_URL }}
+          ANYCABLE_BROADCAST_URL: ${{ secrets.ANYCABLE_BROADCAST_URL }}
+      - if: env.HAS_SECRETS == 'true'
+        name: Deploy
+        id: deploy
+        working-directory: deck
+        run: |
+          url=$(npx -y vercel@latest deploy --prod --yes --token "$VERCEL_TOKEN" \
+            -e ANYCABLE_BROADCAST_URL="$ANYCABLE_BROADCAST_URL" 2>/dev/null | tail -1)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployed $url"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          ANYCABLE_BROADCAST_URL: ${{ secrets.ANYCABLE_BROADCAST_URL }}
+      - if: env.HAS_SECRETS == 'true'
+        name: Verify
+        run: node scripts/verify-deploy.mjs --site "${{ steps.deploy.outputs.url }}" --platform vercel --ws-url "$ANYCABLE_WS_URL"
+        env:
+          ANYCABLE_WS_URL: ${{ secrets.ANYCABLE_WS_URL }}
+
+  netlify:
+    runs-on: ubuntu-latest
+    env:
+      HAS_SECRETS: ${{ secrets.NETLIFY_AUTH_TOKEN != '' && secrets.NETLIFY_SITE_ID != '' && secrets.ANYCABLE_WS_URL != '' && secrets.ANYCABLE_BROADCAST_URL != '' }}
+    steps:
+      - if: env.HAS_SECRETS != 'true'
+        run: echo "::notice::Skipping Netlify e2e, secrets not configured"
+      - if: env.HAS_SECRETS == 'true'
+        uses: actions/checkout@v4
+      - if: env.HAS_SECRETS == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: env.HAS_SECRETS == 'true'
+        run: npm ci
+      - if: env.HAS_SECRETS == 'true'
+        name: Scaffold
+        run: |
+          mkdir deck && cd deck
+          npm init -y >/dev/null
+          npm pkg set name=slide-quiz-e2e type=module
+          npm install --no-audit --no-fund @slidev/cli @slidev/theme-default
+          printf -- '---\ntheme: default\n---\n\n# E2E deck\n' > slides.md
+          node ../index.mjs --yes --platform netlify --no-deploy \
+            --ws-url "$ANYCABLE_WS_URL" --broadcast-url "$ANYCABLE_BROADCAST_URL"
+        env:
+          ANYCABLE_WS_URL: ${{ secrets.ANYCABLE_WS_URL }}
+          ANYCABLE_BROADCAST_URL: ${{ secrets.ANYCABLE_BROADCAST_URL }}
+      - if: env.HAS_SECRETS == 'true'
+        name: Build and deploy
+        id: deploy
+        working-directory: deck
+        run: |
+          npx -y netlify-cli@latest env:set ANYCABLE_BROADCAST_URL "$ANYCABLE_BROADCAST_URL" >/dev/null
+          npx slidev build
+          out=$(npx -y netlify-cli@latest deploy --prod --dir=dist --functions=netlify/functions --json)
+          url=$(echo "$out" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(d.deploy_url||d.url)')
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployed $url"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          ANYCABLE_BROADCAST_URL: ${{ secrets.ANYCABLE_BROADCAST_URL }}
+      - if: env.HAS_SECRETS == 'true'
+        name: Verify
+        run: node scripts/verify-deploy.mjs --site "${{ steps.deploy.outputs.url }}" --platform netlify --ws-url "$ANYCABLE_WS_URL"
+        env:
+          ANYCABLE_WS_URL: ${{ secrets.ANYCABLE_WS_URL }}

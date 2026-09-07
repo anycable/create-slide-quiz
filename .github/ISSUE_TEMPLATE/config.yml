@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Quiz not working after deploy
+    url: https://github.com/anycable/slide-quiz/issues/new?template=bug_report.yml
+    about: Audience cannot join, votes do not appear, red banner on the deck. That is the slide-quiz engine, reported in its repo.
+  - name: Questions and ideas
+    url: https://github.com/anycable/slide-quiz/discussions
+    about: Discussions for the whole slide-quiz family live in the main repo.

@@ -1,0 +1,47 @@
+name: Bug report
+description: create-slide-quiz produced the wrong files, crashed, or the result does not deploy
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If the problem is in the running quiz rather than in the scaffolding (audience cannot join, votes do not land), it belongs in [anycable/slide-quiz](https://github.com/anycable/slide-quiz/issues/new?template=bug_report.yml). Run `npx -p create-slide-quiz verify-slide-quiz --site <url> --platform <netlify|vercel>` first; its output tells you which repo.
+  - type: input
+    id: version
+    attributes:
+      label: create-slide-quiz version
+      description: "`npx create-slide-quiz --help` prints it, or check your npx cache"
+    validations:
+      required: true
+  - type: dropdown
+    id: framework
+    attributes:
+      label: Framework
+      options: [Slidev, Reveal.js, Not detected / other]
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [Netlify, Vercel]
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and full terminal output
+      description: Paste the whole run. Replace your broadcast URL with `<broadcast>`; the WebSocket URL is fine to keep.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: project
+    attributes:
+      label: Project layout before running
+      description: "`ls` of the directory, plus package.json if it existed. Was it a fresh deck or an existing one?"
+      render: text
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead

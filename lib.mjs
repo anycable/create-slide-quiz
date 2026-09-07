@@ -3,6 +3,11 @@
  *
  * Supports Reveal.js and Slidev frameworks.
  * Usage: cd your-presentation && npx create-slide-quiz
+ *
+ * Non-interactive (CI, agents):
+ *   npx create-slide-quiz --yes --platform vercel \
+ *     --ws-url wss://my-cable.fly.dev/cable \
+ *     --broadcast-url https://my-cable.fly.dev/_broadcast --no-deploy
  */
 
 import * as p from "@clack/prompts";
@@ -40,6 +45,82 @@ function hasCommand(name) {
   } catch {
     return false;
   }
+}
+
+// —— CLI arguments ——
+
+const VERSION = JSON.parse(readFileSync(join(__dirname, "package.json"), "utf-8")).version;
+
+const HELP = `create-slide-quiz ${VERSION} — add live audience quizzes to a Reveal.js or Slidev deck
+
+Usage:
+  npx create-slide-quiz [options]
+
+Run inside your presentation directory. Without options the CLI walks you
+through every step. Options make individual steps non-interactive; with
+--yes and both URLs the whole run needs no input (CI, agents).
+
+Options:
+  --platform <netlify|vercel>   Deploy target (default: detected, else netlify)
+  --framework <slidev|revealjs> Only needed when auto-detection fails
+  --ws-url <wss://...>          AnyCable WebSocket URL
+  --broadcast-url <https://...> AnyCable broadcast URL (kept in .env, never in code)
+  --no-deploy                   Skip the deploy step
+  --skills / --no-skills        Copy agent skills into .claude/skills/ (default: ask)
+  -y, --yes                     Accept defaults, skip the review prompt, skip deploy
+  -h, --help                    Show this help
+`;
+
+/**
+ * Parse process.argv-style arguments. Exported for tests.
+ * Unknown flags are an error so typos do not silently fall back to prompts.
+ */
+function parseArgs(argv) {
+  const opts = {};
+  const takeValue = (i, name) => {
+    const v = argv[i + 1];
+    if (v === undefined || v.startsWith("-")) throw new Error(`${name} needs a value`);
+    return v;
+  };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    const eq = a.indexOf("=");
+    const [flag, inline] = eq > -1 ? [a.slice(0, eq), a.slice(eq + 1)] : [a, undefined];
+    const value = (name) => inline ?? takeValue(i++, name);
+    switch (flag) {
+      case "-h": case "--help": opts.help = true; break;
+      case "-y": case "--yes": opts.yes = true; break;
+      case "--no-deploy": opts.deploy = false; break;
+      case "--skills": opts.skills = true; break;
+      case "--no-skills": opts.skills = false; break;
+      case "--platform": {
+        const v = value(flag);
+        if (v !== "netlify" && v !== "vercel") throw new Error(`--platform must be netlify or vercel, got "${v}"`);
+        opts.platform = v; break;
+      }
+      case "--framework": {
+        const v = value(flag);
+        if (v !== "slidev" && v !== "revealjs") throw new Error(`--framework must be slidev or revealjs, got "${v}"`);
+        opts.framework = v; break;
+      }
+      case "--ws-url": {
+        const v = value(flag);
+        if (!v.startsWith("wss://")) throw new Error(`--ws-url should start with "wss://"`);
+        opts.wsUrl = v; break;
+      }
+      case "--broadcast-url": {
+        const v = value(flag);
+        if (!v.startsWith("https://")) throw new Error(`--broadcast-url should start with "https://"`);
+        opts.broadcastUrl = v; break;
+      }
+      default:
+        throw new Error(`Unknown option "${a}". Run with --help to see the options.`);
+    }
+  }
+  if (opts.yes && (!opts.wsUrl || !opts.broadcastUrl)) {
+    throw new Error("--yes needs --ws-url and --broadcast-url, since the CLI cannot create the cable for you.");
+  }
+  return opts;
 }
 
 const CMD_TIMEOUT = 120_000; // 2 minutes for most commands
@@ -153,6 +234,21 @@ function ensureGitignore(dir, entry) {
   }
 }
 
+/** Copy each skill directory from `source` into `dest`. Returns the names copied. */
+function copySkills(source, dest) {
+  const copied = [];
+  for (const name of readdirSync(source)) {
+    const from = join(source, name, "SKILL.md");
+    if (!existsSync(from)) continue;
+    const toDir = join(dest, name);
+    if (existsSync(join(toDir, "SKILL.md"))) continue;
+    mkdirSync(toDir, { recursive: true });
+    copyFileSync(from, join(toDir, "SKILL.md"));
+    copied.push(name);
+  }
+  return copied;
+}
+
 function modifySlidesConfig(dir, wsUrl, quizGroupId, isVercel) {
   const slidesPath = join(dir, "slides.md");
   let content = readFileSync(slidesPath, "utf-8");
@@ -200,7 +296,12 @@ options:
 
 // —— Main ——
 
-async function main() {
+async function main(opts = {}) {
+  if (opts.help) {
+    console.log(HELP);
+    return;
+  }
+
   p.intro(color.bgCyan(color.black(" create-slide-quiz ")));
 
   const dir = process.cwd();
@@ -217,7 +318,7 @@ async function main() {
   let pkg;
   let needsInit = false;
   const pkgPath = join(dir, "package.json");
-  let platform = detectPlatform(dir);
+  let platform = opts.platform ?? detectPlatform(dir);
 
   if (framework === "revealjs") {
     htmlFile = findRevealHtml(dir);
@@ -309,15 +410,21 @@ async function main() {
   } else {
     s.stop(color.yellow("Could not auto-detect framework."));
 
-    const choice = await p.select({
-      message: "What framework are you using?",
-      options: [
-        { value: "revealjs", label: "Reveal.js" },
-        { value: "slidev", label: "Slidev" },
-      ],
-    });
-    if (p.isCancel(choice)) return p.cancel("Cancelled.");
-    framework = choice;
+    if (opts.framework) {
+      framework = opts.framework;
+    } else if (opts.yes) {
+      return p.cancel("Could not detect the framework. Pass --framework slidev or --framework revealjs.");
+    } else {
+      const choice = await p.select({
+        message: "What framework are you using?",
+        options: [
+          { value: "revealjs", label: "Reveal.js" },
+          { value: "slidev", label: "Slidev" },
+        ],
+      });
+      if (p.isCancel(choice)) return p.cancel("Cancelled.");
+      framework = choice;
+    }
 
     if (framework === "revealjs") {
       p.log.error("Could not find a Reveal.js HTML file (with class=\"reveal\") in this directory.");
@@ -346,7 +453,9 @@ async function main() {
 
   // Step 2 — Platform (if not auto-detected)
 
-  if (!platform) {
+  if (!platform && opts.yes) {
+    platform = "netlify";
+  } else if (!platform) {
     const choice = await p.select({
       message: "Deploy platform",
       options: [
@@ -360,11 +469,15 @@ async function main() {
 
   // Step 3 — AnyCable Plus setup
 
-  const setupAnyCable = await p.confirm({
-    message: "Do you already have an AnyCable Plus app set up?",
-    initialValue: false,
-  });
-  if (p.isCancel(setupAnyCable)) return p.cancel("Cancelled.");
+  let urlsFromArgs = Boolean(opts.wsUrl && opts.broadcastUrl);
+  let setupAnyCable = true;
+  if (!urlsFromArgs) {
+    setupAnyCable = await p.confirm({
+      message: "Do you already have an AnyCable Plus app set up?",
+      initialValue: false,
+    });
+    if (p.isCancel(setupAnyCable)) return p.cancel("Cancelled.");
+  }
 
   if (!setupAnyCable) {
     p.log.step(color.bold("Let's create your AnyCable Plus app"));
@@ -419,10 +532,10 @@ async function main() {
 
   // Step 4 — AnyCable URLs + review
 
-  let urls;
+  let urls = urlsFromArgs ? { wsUrl: opts.wsUrl, broadcastUrl: opts.broadcastUrl } : undefined;
 
   while (true) {
-    urls = await p.group(
+    if (!urls || !urlsFromArgs) urls = await p.group(
       {
         wsUrl: () =>
           p.text({
@@ -468,6 +581,8 @@ async function main() {
 
     p.note(reviewLines.join("\n"), "Review your settings");
 
+    if (opts.yes) break;
+
     const confirmLabel = framework === "revealjs"
       ? "Yes, install slide-quiz"
       : "Yes, install slidev-addon-slide-quiz";
@@ -494,7 +609,8 @@ async function main() {
       });
       if (!p.isCancel(newPlatform)) platform = newPlatform;
     }
-    // edit_urls falls through to next iteration
+    // edit_urls: prompt on the next iteration even if the URLs came from flags
+    if (reviewAction === "edit_urls") urlsFromArgs = false;
   }
 
   // Step 5 — Install + create files
@@ -508,11 +624,11 @@ async function main() {
     s.start("Installing slide-quiz...");
     let npmInstallOk = false;
     try {
-      execSync("npm install slide-quiz @anycable/serverless-js", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
+      execSync("npm install slide-quiz @anycable/serverless-js valibot", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
       s.stop("slide-quiz installed!");
       npmInstallOk = true;
     } catch {
-      s.stop(color.yellow("npm install failed — run `npm install slide-quiz @anycable/serverless-js` manually."));
+      s.stop(color.yellow("npm install failed — run `npm install slide-quiz @anycable/serverless-js valibot` manually."));
     }
 
     if (!existsSync(join(dir, "quiz.html"))) {
@@ -562,11 +678,11 @@ createParticipantUI("#quiz-root", {
     s.start("Installing slidev-addon-slide-quiz...");
     let npmInstallOk = false;
     try {
-      execSync("npm install slidev-addon-slide-quiz @anycable/serverless-js", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
+      execSync("npm install slidev-addon-slide-quiz @anycable/serverless-js valibot", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
       s.stop("slidev-addon-slide-quiz installed!");
       npmInstallOk = true;
     } catch {
-      s.stop(color.yellow("npm install failed — run `npm install slidev-addon-slide-quiz @anycable/serverless-js` manually."));
+      s.stop(color.yellow("npm install failed — run `npm install slidev-addon-slide-quiz @anycable/serverless-js valibot` manually."));
     }
 
     // Copy quiz.html to public/
@@ -581,13 +697,15 @@ createParticipantUI("#quiz-root", {
         p.log.info("public/quiz.html already exists — skipped.");
       }
 
-      // Copy _redirects for Netlify
-      if (!isVercel && !existsSync(join(dir, "public", "_redirects"))) {
-        copyFileSync(join(addonPublicDir, "_redirects"), join(dir, "public", "_redirects"));
-        p.log.success("Copied _redirects to public/");
-      }
     } else if (!npmInstallOk) {
       p.log.warn("Skipping file copies — install the packages first, then re-run create-slide-quiz.");
+    }
+
+    // Slidev uses history routing, so deep links need a SPA redirect on Netlify.
+    // Netlify resolves /.netlify/functions/* before redirects, so this is safe.
+    if (!isVercel && !existsSync(join(dir, "public", "_redirects"))) {
+      writeFileSync(join(dir, "public", "_redirects"), "/*  /index.html  200\n");
+      p.log.success("Created public/_redirects");
     }
   }
 
@@ -600,6 +718,7 @@ createParticipantUI("#quiz-root", {
     const fnDir = join(dir, "netlify", "functions");
     mkdirSync(fnDir, { recursive: true });
     for (const f of readdirSync(join(functionsSource, "netlify"))) {
+      if (f === "package.json") continue; // deps are installed at the project root
       if (!existsSync(join(fnDir, f))) {
         copyFileSync(join(functionsSource, "netlify", f), join(fnDir, f));
       }
@@ -618,11 +737,21 @@ createParticipantUI("#quiz-root", {
     const apiDir = join(dir, "api");
     mkdirSync(apiDir, { recursive: true });
     for (const f of readdirSync(join(functionsSource, "vercel"))) {
+      if (f === "package.json") continue; // deps are installed at the project root
       if (!existsSync(join(apiDir, f))) {
         copyFileSync(join(functionsSource, "vercel", f), join(apiDir, f));
       }
     }
     p.log.success("Created api/");
+
+    // Vercel has no preset for Slidev; without this it serves the source tree.
+    if (framework === "slidev" && !existsSync(join(dir, "vercel.json"))) {
+      writeFileSync(
+        join(dir, "vercel.json"),
+        JSON.stringify({ buildCommand: "npx slidev build", outputDirectory: "dist" }, null, 2) + "\n",
+      );
+      p.log.success("Created vercel.json");
+    }
   }
 
   // .env
@@ -636,6 +765,27 @@ createParticipantUI("#quiz-root", {
       p.log.success("Added ANYCABLE_BROADCAST_URL to .env");
     } else {
       p.log.info(".env already has ANYCABLE_BROADCAST_URL — skipped.");
+    }
+  }
+
+  // Agent skills (setup + debug) ship inside slide-quiz. Offer to put them
+  // where Claude Code and similar tools look, so "add a quiz slide" or
+  // "the audience can't join" become one prompt away.
+  const skillsSource = join(dir, "node_modules", "slide-quiz", "skills");
+  if (existsSync(skillsSource)) {
+    let wantSkills = opts.skills;
+    if (wantSkills === undefined && opts.yes) wantSkills = true;
+    if (wantSkills === undefined) {
+      const answer = await p.confirm({
+        message: "Add slide-quiz agent skills to .claude/skills/ (for Claude Code and other AI tools)?",
+        initialValue: true,
+      });
+      wantSkills = !p.isCancel(answer) && answer;
+    }
+    if (wantSkills) {
+      const copied = copySkills(skillsSource, join(dir, ".claude", "skills"));
+      if (copied.length) p.log.success(`Added agent skills: ${copied.join(", ")}`);
+      else p.log.info(".claude/skills/ already has the slide-quiz skills — skipped.");
     }
   }
 
@@ -889,7 +1039,15 @@ createParticipantUI("#quiz-root", {
     ? gitRemoteUrl.replace(/.*[:/](.+\/.+?)(?:\.git)?$/, "$1")
     : quizGroupId;
 
-  if (platform === "netlify") {
+  if (opts.deploy === false || opts.yes) {
+    // --yes must never block on a prompt or push to production on its own.
+    p.log.info(opts.yes ? "Skipping deploy (--yes). Deploy when you are ready:" : "Skipping deploy (--no-deploy).");
+    if (opts.yes) {
+      p.log.info(platform === "netlify"
+        ? `  ${buildCmd} && netlify deploy --prod --dir=dist`
+        : "  vercel --prod");
+    }
+  } else if (platform === "netlify") {
     const hasNetlify = hasCommand("netlify");
 
     if (hasNetlify) {
@@ -1094,22 +1252,29 @@ createParticipantUI("#quiz-root", {
   p.outro(color.green("Happy quizzing! 🎯"));
 }
 
-async function safeMain() {
+async function safeMain(argv = process.argv.slice(2)) {
+  let opts;
   try {
-    await main();
+    opts = parseArgs(argv);
+  } catch (err) {
+    console.error(color.red(err.message));
+    process.exit(2);
+  }
+  try {
+    await main(opts);
   } catch (err) {
     if (err?.message?.includes("User force closed")) {
       // Ctrl+C — exit silently
       process.exit(0);
     }
     p.log.error(`Unexpected error: ${err?.message || err}`);
-    p.log.info("If this keeps happening, please open an issue at https://github.com/anycable/slide-quiz/issues");
+    p.log.info("If this keeps happening, please open an issue at https://github.com/anycable/create-slide-quiz/issues/new?template=bug_report.yml");
     process.exit(1);
   }
 }
 
 export {
   detectFramework, findRevealHtml, findJsEntry, detectPlatform, detectVite,
-  insertQuizSlides, modifySlidesConfig, ensureGitignore, SLIDEV_QUIZ_SLIDES,
-  main, safeMain,
+  insertQuizSlides, modifySlidesConfig, ensureGitignore, copySkills, SLIDEV_QUIZ_SLIDES,
+  parseArgs, main, safeMain,
 };

@@ -86,9 +86,20 @@ describe("Slidev + Netlify flow", () => {
     expect(existsSync(join(dir, "public", "quiz.html"))).toBe(true);
   });
 
-  it("copies _redirects to public/ for Netlify", async () => {
+  it("writes a SPA _redirects to public/ for Netlify", async () => {
     await main();
-    expect(existsSync(join(dir, "public", "_redirects"))).toBe(true);
+    expect(readFileSync(join(dir, "public", "_redirects"), "utf-8")).toBe("/*  /index.html  200\n");
+  });
+
+  it("copies agent skills into .claude/skills/ when confirmed", async () => {
+    await main();
+    expect(existsSync(join(dir, ".claude", "skills", "slide-quiz-setup", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(dir, ".claude", "skills", "slide-quiz-debug", "SKILL.md"))).toBe(true);
+  });
+
+  it("skips agent skills with skills: false", async () => {
+    await main({ skills: false });
+    expect(existsSync(join(dir, ".claude"))).toBe(false);
   });
 
   it("copies functions to netlify/functions/", async () => {
@@ -143,6 +154,12 @@ describe("Slidev + Vercel flow", () => {
     const content = readFileSync(join(dir, "slides.md"), "utf-8");
     expect(content).toContain("endpoints:");
     expect(content).toContain("answer: /api/quiz-answer");
+  });
+
+  it("creates vercel.json with the Slidev build command", async () => {
+    await main();
+    const cfg = JSON.parse(readFileSync(join(dir, "vercel.json"), "utf-8"));
+    expect(cfg).toEqual({ buildCommand: "npx slidev build", outputDirectory: "dist" });
   });
 
   it("does not copy _redirects", async () => {
@@ -217,5 +234,80 @@ describe("Slidev (no slides.md, user-selected)", () => {
     expect(content).toContain("slidev-addon-slide-quiz");
     expect(content).toContain("slideQuiz:");
     expect(content).toContain("layout: quiz-results");
+  });
+});
+
+describe("Non-interactive flow (--yes with URLs)", () => {
+  const flags = {
+    yes: true,
+    platform: "vercel",
+    wsUrl: "wss://ci.anycable.io/cable",
+    broadcastUrl: "https://ci.anycable.io/_broadcast",
+    deploy: false,
+  };
+
+  beforeEach(async () => {
+    ({ dir, cleanup } = await createTestDir({ framework: "slidev" }));
+    vi.spyOn(process, "cwd").mockReturnValue(dir);
+    // No prompt mocks on purpose: any prompt call would resolve to undefined and break the flow.
+    vi.clearAllMocks();
+  });
+
+  it("completes without calling any prompt", async () => {
+    await main(flags);
+    expect(p.select).not.toHaveBeenCalled();
+    expect(p.confirm).not.toHaveBeenCalled();
+    expect(p.group).not.toHaveBeenCalled();
+    expect(p.text).not.toHaveBeenCalled();
+  });
+
+  it("uses the flag values for platform and URLs", async () => {
+    await main(flags);
+    const slides = readFileSync(join(dir, "slides.md"), "utf-8");
+    expect(slides).toContain("wsUrl: wss://ci.anycable.io/cable");
+    expect(slides).toContain("answer: /api/quiz-answer");
+    expect(existsSync(join(dir, "api", "quiz-sync.mjs"))).toBe(true);
+    expect(readFileSync(join(dir, ".env"), "utf-8")).toContain("https://ci.anycable.io/_broadcast");
+  });
+
+  it("--yes skips deploy even without --no-deploy", async () => {
+    const { deploy, ...rest } = flags;
+    await main(rest);
+    expect(p.log.info).toHaveBeenCalledWith(expect.stringContaining("Skipping deploy (--yes)"));
+    expect(p.confirm).not.toHaveBeenCalled();
+  });
+
+  it("URLs from flags without --yes still allow editing them at the review", async () => {
+    // Review: first "edit_urls", then "confirm". The group prompt must run once.
+    p.select.mockResolvedValueOnce("edit_urls").mockResolvedValueOnce("confirm");
+    p.group.mockResolvedValue({ wsUrl: "wss://edited.anycable.io/cable", broadcastUrl: "https://edited.anycable.io/_broadcast" });
+    p.confirm.mockResolvedValue(false); // skills prompt
+    const { yes, ...rest } = flags;
+    await main(rest);
+    expect(p.group).toHaveBeenCalledTimes(1);
+    expect(readFileSync(join(dir, "slides.md"), "utf-8")).toContain("wss://edited.anycable.io/cable");
+  });
+
+  it("--yes implies agent skills", async () => {
+    await main(flags);
+    expect(existsSync(join(dir, ".claude", "skills", "slide-quiz-setup", "SKILL.md"))).toBe(true);
+  });
+
+  it("--yes without a detectable framework cancels with a hint", async () => {
+    await cleanup();
+    ({ dir, cleanup } = await createTestDir({ framework: "empty" }));
+    vi.spyOn(process, "cwd").mockReturnValue(dir);
+    await main(flags);
+    expect(p.cancel).toHaveBeenCalledWith(expect.stringContaining("--framework"));
+  });
+
+  it("--framework slidev scaffolds slides.md in an empty directory", async () => {
+    await cleanup();
+    ({ dir, cleanup } = await createTestDir({ framework: "empty" }));
+    vi.spyOn(process, "cwd").mockReturnValue(dir);
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "empty-deck" }));
+    await main({ ...flags, framework: "slidev" });
+    expect(existsSync(join(dir, "slides.md"))).toBe(true);
+    expect(readFileSync(join(dir, "slides.md"), "utf-8")).toContain("quizGroupId: empty-deck");
   });
 });

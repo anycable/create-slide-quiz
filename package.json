@@ -1,12 +1,16 @@
 {
   "name": "create-slide-quiz",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Scaffold a Reveal.js or Slidev presentation with live audience quizzes",
   "type": "module",
-  "bin": "index.mjs",
+  "bin": {
+    "create-slide-quiz": "index.mjs",
+    "verify-slide-quiz": "scripts/verify-deploy.mjs"
+  },
   "files": [
     "index.mjs",
-    "lib.mjs"
+    "lib.mjs",
+    "scripts/verify-deploy.mjs"
   ],
   "scripts": {
     "test": "vitest run"
@@ -17,7 +21,8 @@
   },
   "dependencies": {
     "@clack/prompts": "^0.9.1",
-    "picocolors": "^1.1.1"
+    "picocolors": "^1.1.1",
+    "@anycable/core": "^1.1.0"
   },
   "license": "MIT",
   "keywords": [
@@ -31,5 +36,8 @@
   ],
   "devDependencies": {
     "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
