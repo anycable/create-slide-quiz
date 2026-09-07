@@ -67,7 +67,7 @@ Options:
   --broadcast-url <https://...> AnyCable broadcast URL (kept in .env, never in code)
   --no-deploy                   Skip the deploy step
   --skills / --no-skills        Copy agent skills into .claude/skills/ (default: ask)
-  -y, --yes                     Accept defaults and skip the review prompt
+  -y, --yes                     Accept defaults, skip the review prompt, skip deploy
   -h, --help                    Show this help
 `;
 
@@ -469,7 +469,7 @@ async function main(opts = {}) {
 
   // Step 3 — AnyCable Plus setup
 
-  const urlsFromArgs = Boolean(opts.wsUrl && opts.broadcastUrl);
+  let urlsFromArgs = Boolean(opts.wsUrl && opts.broadcastUrl);
   let setupAnyCable = true;
   if (!urlsFromArgs) {
     setupAnyCable = await p.confirm({
@@ -609,7 +609,8 @@ async function main(opts = {}) {
       });
       if (!p.isCancel(newPlatform)) platform = newPlatform;
     }
-    // edit_urls falls through to next iteration
+    // edit_urls: prompt on the next iteration even if the URLs came from flags
+    if (reviewAction === "edit_urls") urlsFromArgs = false;
   }
 
   // Step 5 — Install + create files
@@ -1038,8 +1039,14 @@ createParticipantUI("#quiz-root", {
     ? gitRemoteUrl.replace(/.*[:/](.+\/.+?)(?:\.git)?$/, "$1")
     : quizGroupId;
 
-  if (opts.deploy === false) {
-    p.log.info("Skipping deploy (--no-deploy).");
+  if (opts.deploy === false || opts.yes) {
+    // --yes must never block on a prompt or push to production on its own.
+    p.log.info(opts.yes ? "Skipping deploy (--yes). Deploy when you are ready:" : "Skipping deploy (--no-deploy).");
+    if (opts.yes) {
+      p.log.info(platform === "netlify"
+        ? `  ${buildCmd} && netlify deploy --prod --dir=dist`
+        : "  vercel --prod");
+    }
   } else if (platform === "netlify") {
     const hasNetlify = hasCommand("netlify");
 

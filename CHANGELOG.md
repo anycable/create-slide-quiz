@@ -5,7 +5,7 @@
 ### 0.3.0
 
 #### Added
-- Flags for every prompt: `--platform`, `--framework`, `--ws-url`, `--broadcast-url`, `--no-deploy`, `--skills` / `--no-skills`, `--yes`, `--help`. With `--yes` and both URLs the CLI runs without input, for CI and for AI agents.
+- Flags for every prompt: `--platform`, `--framework`, `--ws-url`, `--broadcast-url`, `--no-deploy`, `--skills` / `--no-skills`, `--yes`, `--help`. With `--yes` and both URLs the CLI runs without input, for CI and for AI agents. `--yes` also skips the deploy step, so it never blocks on a prompt or pushes to production on its own.
 - `verify-slide-quiz` bin (`npx -p create-slide-quiz verify-slide-quiz --site <url> --platform <netlify|vercel> --ws-url <wss://...>`). Checks the audience page, both functions, and a broadcast round trip over the WebSocket. Needs Node 22.
 - Copies the agent skills shipped in `slide-quiz` 0.6+ into `.claude/skills/` (asked interactively, implied by `--yes`).
 - Writes `vercel.json` for Slidev decks on Vercel. Without it Vercel served the source tree.

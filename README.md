@@ -55,7 +55,7 @@ npx create-slide-quiz --yes --platform vercel --no-deploy \
 | `--ws-url`, `--broadcast-url` | AnyCable URLs. The broadcast URL goes to `.env` and the host, never into code |
 | `--no-deploy` | Skip the deploy step |
 | `--skills` / `--no-skills` | Copy the slide-quiz agent skills into `.claude/skills/`. Default: ask; `--yes` implies yes |
-| `-y`, `--yes` | Skip the review prompt and accept defaults |
+| `-y`, `--yes` | Skip the review prompt, accept defaults, and skip the deploy step (it prints the deploy command instead) |
 
 `npx create-slide-quiz --help` lists them.
 

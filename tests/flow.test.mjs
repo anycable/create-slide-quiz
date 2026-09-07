@@ -270,6 +270,24 @@ describe("Non-interactive flow (--yes with URLs)", () => {
     expect(readFileSync(join(dir, ".env"), "utf-8")).toContain("https://ci.anycable.io/_broadcast");
   });
 
+  it("--yes skips deploy even without --no-deploy", async () => {
+    const { deploy, ...rest } = flags;
+    await main(rest);
+    expect(p.log.info).toHaveBeenCalledWith(expect.stringContaining("Skipping deploy (--yes)"));
+    expect(p.confirm).not.toHaveBeenCalled();
+  });
+
+  it("URLs from flags without --yes still allow editing them at the review", async () => {
+    // Review: first "edit_urls", then "confirm". The group prompt must run once.
+    p.select.mockResolvedValueOnce("edit_urls").mockResolvedValueOnce("confirm");
+    p.group.mockResolvedValue({ wsUrl: "wss://edited.anycable.io/cable", broadcastUrl: "https://edited.anycable.io/_broadcast" });
+    p.confirm.mockResolvedValue(false); // skills prompt
+    const { yes, ...rest } = flags;
+    await main(rest);
+    expect(p.group).toHaveBeenCalledTimes(1);
+    expect(readFileSync(join(dir, "slides.md"), "utf-8")).toContain("wss://edited.anycable.io/cable");
+  });
+
   it("--yes implies agent skills", async () => {
     await main(flags);
     expect(existsSync(join(dir, ".claude", "skills", "slide-quiz-setup", "SKILL.md"))).toBe(true);

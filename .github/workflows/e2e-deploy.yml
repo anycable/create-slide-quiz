@@ -106,9 +106,9 @@ jobs:
         id: deploy
         working-directory: deck
         run: |
-          npx -y netlify-cli@latest env:set ANYCABLE_BROADCAST_URL "$ANYCABLE_BROADCAST_URL" --site "$NETLIFY_SITE_ID" >/dev/null
+          npx -y netlify-cli@latest env:set ANYCABLE_BROADCAST_URL "$ANYCABLE_BROADCAST_URL" >/dev/null
           npx slidev build
-          out=$(npx -y netlify-cli@latest deploy --prod --dir=dist --functions=netlify/functions --site "$NETLIFY_SITE_ID" --json)
+          out=$(npx -y netlify-cli@latest deploy --prod --dir=dist --functions=netlify/functions --json)
           url=$(echo "$out" | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(d.deploy_url||d.url)')
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed $url"
