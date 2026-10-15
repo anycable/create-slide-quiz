@@ -49,6 +49,21 @@ function hasCommand(name) {
 
 // —— CLI arguments ——
 
+/**
+ * The stylesheet import for the installed Reveal.js. Reveal.js 6 exports it
+ * as `reveal.js/reveal.css` and blocks `dist/` paths; 4 and 5 have no
+ * exports map, so only the `dist/` path resolves.
+ */
+export function revealCssImport(dir) {
+  try {
+    const { version } = JSON.parse(readFileSync(join(dir, "node_modules", "reveal.js", "package.json"), "utf-8"));
+    if (parseInt(version, 10) >= 6) return "reveal.js/reveal.css";
+  } catch {
+    /* not installed yet: assume the older layout */
+  }
+  return "reveal.js/dist/reveal.css";
+}
+
 const VERSION = JSON.parse(readFileSync(join(__dirname, "package.json"), "utf-8")).version;
 
 const HELP = `create-slide-quiz ${VERSION} — add live audience quizzes to a Reveal.js or Slidev deck
@@ -350,8 +365,7 @@ async function main(opts = {}) {
       }
 
       p.log.info("Installing reveal.js...");
-      // slide-quiz supports Reveal.js 4 and 5; the latest major would fail its peer range
-      execSync("npm install reveal.js@^5", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
+      execSync("npm install reveal.js", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
       pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
       p.log.success("Project initialized with reveal.js");
     }
@@ -630,10 +644,6 @@ async function main(opts = {}) {
       npmInstallOk = true;
     } catch {
       s.stop(color.yellow("npm install failed — run `npm install slide-quiz @anycable/serverless-js valibot` manually."));
-      const revealRange = pkg?.dependencies?.["reveal.js"] ?? pkg?.devDependencies?.["reveal.js"] ?? "";
-      if (/^\D*([6-9]|\d{2,})\./.test(revealRange)) {
-        p.log.warn(`slide-quiz supports Reveal.js 4 and 5, and this deck uses reveal.js ${revealRange}. Run \`npm install reveal.js@5\`, then re-run create-slide-quiz.`);
-      }
     }
 
     if (!existsSync(join(dir, "quiz.html"))) {
@@ -902,7 +912,7 @@ createParticipantUI("#quiz-root", {
 
           const mainJs = [
             'import Reveal from "reveal.js";',
-            'import "reveal.js/dist/reveal.css";',
+            `import "${revealCssImport(dir)}";`,
             'import RevealSlideQuiz from "slide-quiz";',
             'import "slide-quiz/style.css";',
             "",

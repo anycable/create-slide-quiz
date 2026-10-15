@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+#### Changed
+- Installs the latest Reveal.js again (6), now that slide-quiz 0.7.3 accepts it. A deck converted from a CDN page imports Reveal.js's stylesheet by the path the installed version exports: `reveal.js/reveal.css` on 6, `reveal.js/dist/reveal.css` on 4 and 5.
+
 #### Fixed
 - The npm package includes the MIT license. npm only picks up a license file whose name starts with `LICENSE`, and the file was named `MIT-LICENSE`.
 

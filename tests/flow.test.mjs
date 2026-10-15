@@ -212,22 +212,22 @@ describe("Reveal.js versions", () => {
     setupFlowMocks({ platform: "netlify" });
   });
 
-  it("installs Reveal.js 5 into a deck without it, since slide-quiz does not accept 6 yet", async () => {
+  it("installs the latest Reveal.js into a deck without it", async () => {
     const { execSync } = await import("node:child_process");
     writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "bare" }));
     await main();
-    expect(execSync).toHaveBeenCalledWith("npm install reveal.js@^5", expect.anything());
+    expect(execSync).toHaveBeenCalledWith("npm install reveal.js", expect.anything());
   });
 
-  it("explains the conflict when a deck on Reveal.js 6 cannot install slide-quiz", async () => {
-    const { execSync } = await import("node:child_process");
-    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "r6", dependencies: { "reveal.js": "^6.0.2" } }));
-    execSync.mockImplementation((cmd) => {
-      if (String(cmd).startsWith("npm install slide-quiz")) throw new Error("ERESOLVE");
-    });
-    await main();
-    execSync.mockReset();
-    expect(p.log.warn).toHaveBeenCalledWith(expect.stringContaining("npm install reveal.js@5"));
+  it("imports the stylesheet by the path the installed Reveal.js exports", async () => {
+    const { revealCssImport } = await import("../lib.mjs");
+    const { mkdirSync } = await import("node:fs");
+    expect(revealCssImport(dir)).toBe("reveal.js/dist/reveal.css");
+    mkdirSync(join(dir, "node_modules", "reveal.js"), { recursive: true });
+    for (const [version, path] of [["5.2.1", "reveal.js/dist/reveal.css"], ["6.0.2", "reveal.js/reveal.css"]]) {
+      writeFileSync(join(dir, "node_modules", "reveal.js", "package.json"), JSON.stringify({ version }));
+      expect(revealCssImport(dir)).toBe(path);
+    }
   });
 });
 
