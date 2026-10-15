@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+#### Fixed
+- The npm package includes the MIT license. npm only picks up a license file whose name starts with `LICENSE`, and the file was named `MIT-LICENSE`.
+
 ## 0.3.1, 2026-10-15
 
 #### Fixed
