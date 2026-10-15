@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1, 2026-10-15
 
 #### Fixed
 - Reveal.js decks got no functions: since Reveal.js 6 came out, `npm install reveal.js` installs 6, which slide-quiz does not accept yet, so installing slide-quiz failed with a peer conflict. The CLI now installs Reveal.js 5 into a page that has none, and tells a deck already on Reveal.js 6 to install 5.
