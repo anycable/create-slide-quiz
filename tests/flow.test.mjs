@@ -205,6 +205,32 @@ describe("Reveal.js + Netlify flow", () => {
   });
 });
 
+describe("Reveal.js versions", () => {
+  beforeEach(async () => {
+    ({ dir, cleanup } = await createTestDir({ framework: "revealjs" }));
+    vi.spyOn(process, "cwd").mockReturnValue(dir);
+    setupFlowMocks({ platform: "netlify" });
+  });
+
+  it("installs Reveal.js 5 into a deck without it, since slide-quiz does not accept 6 yet", async () => {
+    const { execSync } = await import("node:child_process");
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "bare" }));
+    await main();
+    expect(execSync).toHaveBeenCalledWith("npm install reveal.js@^5", expect.anything());
+  });
+
+  it("explains the conflict when a deck on Reveal.js 6 cannot install slide-quiz", async () => {
+    const { execSync } = await import("node:child_process");
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "r6", dependencies: { "reveal.js": "^6.0.2" } }));
+    execSync.mockImplementation((cmd) => {
+      if (String(cmd).startsWith("npm install slide-quiz")) throw new Error("ERESOLVE");
+    });
+    await main();
+    execSync.mockReset();
+    expect(p.log.warn).toHaveBeenCalledWith(expect.stringContaining("npm install reveal.js@5"));
+  });
+});
+
 describe("Slidev (no slides.md, user-selected)", () => {
   beforeEach(async () => {
     ({ dir, cleanup } = await createTestDir());

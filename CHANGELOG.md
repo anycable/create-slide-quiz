@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+#### Fixed
+- Reveal.js decks got no functions: since Reveal.js 6 came out, `npm install reveal.js` installs 6, which slide-quiz does not accept yet, so installing slide-quiz failed with a peer conflict. The CLI now installs Reveal.js 5 into a page that has none, and tells a deck already on Reveal.js 6 to install 5.
+- The deploy verifier's hint for a missing Slidev audience page says to copy `quiz.html` into `public/`.
+
+#### Changed
+- The CLI installs the latest slide-quiz, so new decks get 0.7.2 and its functions, which keep phones on the current question through bad wifi. To update an existing deck, copy the functions and `quiz.html` from `node_modules` again.
+- CI scaffolds a Reveal.js page too.
+
 ## 0.3.0, 2026-09-07
 
 #### Added

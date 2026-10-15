@@ -350,7 +350,8 @@ async function main(opts = {}) {
       }
 
       p.log.info("Installing reveal.js...");
-      execSync("npm install reveal.js", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
+      // slide-quiz supports Reveal.js 4 and 5; the latest major would fail its peer range
+      execSync("npm install reveal.js@^5", { cwd: dir, stdio: "pipe", timeout: CMD_TIMEOUT });
       pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
       p.log.success("Project initialized with reveal.js");
     }
@@ -629,6 +630,10 @@ async function main(opts = {}) {
       npmInstallOk = true;
     } catch {
       s.stop(color.yellow("npm install failed — run `npm install slide-quiz @anycable/serverless-js valibot` manually."));
+      const revealRange = pkg?.dependencies?.["reveal.js"] ?? pkg?.devDependencies?.["reveal.js"] ?? "";
+      if (/^\D*([6-9]|\d{2,})\./.test(revealRange)) {
+        p.log.warn(`slide-quiz supports Reveal.js 4 and 5, and this deck uses reveal.js ${revealRange}. Run \`npm install reveal.js@5\`, then re-run create-slide-quiz.`);
+      }
     }
 
     if (!existsSync(join(dir, "quiz.html"))) {

@@ -56,3 +56,29 @@ jobs:
       - name: Build the deck
         working-directory: deck
         run: npx slidev build
+
+  # Same for a bare Reveal.js page: catches peer-range conflicts between the
+  # Reveal.js the CLI installs and the one slide-quiz accepts.
+  scaffold-revealjs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Create a bare Reveal.js page
+        run: |
+          mkdir deck && cd deck
+          printf '<!doctype html><html><body><div class="reveal"><div class="slides"><section>CI</section></div></div><script type="module" src="/main.js"></script></body></html>\n' > index.html
+          printf 'import Reveal from "reveal.js";\nReveal.initialize({ hash: true });\n' > main.js
+      - name: Run create-slide-quiz non-interactively (Netlify layout)
+        working-directory: deck
+        run: |
+          node ../index.mjs --yes --framework revealjs --platform netlify --no-deploy \
+            --ws-url wss://example.invalid/cable --broadcast-url https://example.invalid/_broadcast
+          test -d node_modules/slide-quiz
+          test -f netlify/functions/quiz-sync.mts && test -f netlify/functions/shared.mts
+          test -f quiz.html && test -f .env
+          grep -q 'RevealSlideQuiz' main.js
